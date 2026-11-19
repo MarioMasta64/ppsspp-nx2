@@ -80,10 +80,10 @@ settings/saves use `ppsspp-switch2-gameshare/guest/config/ppsspp`. The existing
 working app's memory stick is not reused. Guest native text-entry applets are
 disabled because their routing to the remote screen is not implemented.
 
-The SDK shares application audio. This experiment mixes both emulator streams
-into the application's output, with headroom while hosting. It does not claim
-separate host-only/guest-only audio routing. Audible GameShare audio still
-requires a device test, even though native PPSSPP audio worked previously.
+PPSSPP sends the guest emulator's PCM to the native per-guest queue and
+keeps the host emulator on normal AudOut. See the
+[recovered audio contract](Switch/GameShare/sdk/docs/GUEST_AUDIO.md).
+The direct path needs a console test for audible playback on the client.
 
 PSP ad hoc multiplayer between the copies is not yet configured or qualified.
 Moonlight's research found LAN disruption during GameShare; that does not prove
@@ -191,3 +191,11 @@ exposes an application-wide mirroring flag and device-volume configuration.
 A separate guest audio route remains unverified. Another audio backend
 replacement should be preceded by evidence of a native guest audio route or a
 controlled mirror-mode comparison.
+
+## Direct guest audio investigation
+
+The shipped SDK exports a separate PCM writer and per-guest queue counters.
+The reusable Moonlight SDK and its PPSSPP copy now expose a PCM callback.
+Tests of the native worker cover the recovered command layout, the unwritten
+tail after a partial write, and a failed audio command that leaves video and
+input running. A successful local build does not establish client playback.

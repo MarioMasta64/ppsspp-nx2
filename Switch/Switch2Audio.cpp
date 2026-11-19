@@ -13,9 +13,6 @@
 #include <thread>
 #include "Common/Audio/AudioBackend.h"
 #include "Common/System/NativeApp.h"
-#if defined(PPSSPP_SWITCH2_GAMESHARE)
-#include "Switch/GameShare/Integration.h"
-#endif
 
 namespace {
 class Switch2AudioBackend final : public AudioBackend {
@@ -94,9 +91,6 @@ public:
 				samples.fill(0.0f);
 				if (callback_)
 					callback_(samples.data(), PERIOD_FRAMES, SAMPLE_RATE, userdata_);
-				#if defined(PPSSPP_SWITCH2_GAMESHARE)
-				Switch2GameShareMix(samples.data(), PERIOD_FRAMES, SAMPLE_RATE);
-				#endif
 				auto *pcm = static_cast<int16_t *>(released->buffer);
 				for (size_t i = 0; i < samples.size(); ++i) {
 					const float sample = std::isfinite(samples[i]) ? samples[i] : 0.0f;

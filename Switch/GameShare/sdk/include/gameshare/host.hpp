@@ -8,6 +8,10 @@
 namespace gameshare {
 enum class LogLevel { Info, Error };
 using LogCallback = void (*)(void* user, LogLevel level, const char* message);
+// Pulls interleaved stereo PCM16 at 48 kHz on the native worker. The source
+// must fill every requested frame, using silence when no game is playing.
+inline constexpr std::uint32_t GuestAudioMaxFrames = 512;
+using GuestAudioCallback = void (*)(void* user, std::int16_t* pcm, std::uint32_t frames);
 enum class VideoMode : std::uint8_t { Mirror = 0, SeparateDisplay = 1 };
 
 // Renderer/display provider for mode1. Both calls run on the native worker.
@@ -36,6 +40,10 @@ struct HostConfig {
     // Optional worker-thread log sink. The application owns user-data lifetime.
     LogCallback log = nullptr;
     void* logUser = nullptr;
+    // Optional direct audio for SeparateDisplay. The app supplies the guest
+    // source and keeps it alive through stopAndWait(). Disable mirrorAudio.
+    GuestAudioCallback guestAudio = nullptr;
+    void* guestAudioUser = nullptr;
 };
 
 // Switch2-only native LOCAL host, one guest, mirrored or separate guest display.

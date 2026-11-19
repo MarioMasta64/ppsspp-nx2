@@ -20,7 +20,7 @@ The library uses the public libounce SDK. It has no Borealis, SDL, Vulkan, FFmpe
 | Default-display mirroring | Physically confirmed by the user on 2026-11-17 |
 | Separate application-rendered guest image | Compiled SDK example confirmed by the user: animated image, A/B response and normal stop/exit |
 | Guest controller samples | Real button changes confirmed in Probe and in the compiled SDK example |
-| Application audio sharing | Native enable/configuration calls succeed; an audible test fixture remains pending |
+| Application audio sharing | Native mirroring calls succeed. Direct guest PCM is available for separate display, with audible playback pending a device test. [Evidence and API](docs/GUEST_AUDIO.md) |
 | Concurrent Moonlight PC streaming and guest PC input | Integration implemented; PC networking currently fails during GameShare initialization on Wi-Fi and Ethernet |
 | Internet/GameChat hosting or multiple guests | Outside this implementation |
 | Encoded video/audio injection or an application-selected wire protocol | Outside this API |

@@ -9,6 +9,7 @@ The public entry points are in [`gameshare/host.hpp`](../include/gameshare/host.
 | `videoMode` | `gameshare::VideoMode::Mirror` | Mirror the default display, or select `SeparateDisplay` for an application-rendered guest image. |
 | `videoTarget` | empty | `std::shared_ptr<gameshare::VideoTarget>` required in separate-display mode. |
 | `mirrorAudio` | `true` | Request native sharing of the application's audio mix. Audible output still needs fixture qualification. |
+| `guestAudio` | `nullptr` | Optional direct PCM callback for separate display. Requires `mirrorAudio=false`. |
 | `readGuestInput` | `true` | Read guest controller shared memory and publish snapshots through `controller()`. |
 | `supportedControllerStyles` | `7` | Nonzero subset of the native style bits FullKey `1`, Handheld `2`, JoyDual `4`. These are the decoded styles. |
 | `matchTimeoutMs` | `240000` | Deadline for each foreground user-selection or matchmaking wait, in the range `1000`–`600000` ms. Cancellation also observes `requestStop()`. |
@@ -76,6 +77,18 @@ This API provides an application-rendered image path. It does not accept compres
 With audio sharing enabled, the host uses the application's borrowed SelfController to enable its native mix-sharing flag. It reads current device volume/auto-tune values and forwards those values to StreamPlay; it does not change system volume settings. Coordinate this application-scoped audio flag with any other component that changes it. The SDK disables the flag it enabled during normal shutdown.
 
 The flag/configuration calls are qualified; audible guest output and Moonlight's concurrent playback still need a device fixture. An enabled flag alone is not an audio test.
+
+### Direct PCM for a separate guest
+
+Set `HostConfig::guestAudio` and optionally `guestAudioUser` when using
+`SeparateDisplay`. Set `mirrorAudio=false`. The callback runs on the native
+worker and fills every requested interleaved stereo PCM16 frame at 48 kHz.
+Each request asks for at most `GuestAudioMaxFrames` (512). Fill silence
+when the source has nothing to play. Keep the source alive through
+`stopAndWait()`. The callback must return promptly and must not call host
+lifecycle methods. The SDK owns the bounded queue submission, including
+partial writes. Audio errors are sent to the log callback while video and
+input continue. See the [direct audio evidence](GUEST_AUDIO.md).
 
 ## Controller snapshots
 

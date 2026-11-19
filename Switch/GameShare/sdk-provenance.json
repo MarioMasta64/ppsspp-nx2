@@ -54,6 +54,19 @@
     "include/gameshare/guest_display.hpp": "e1ed1519afd7d0054b2768918a5e22a8545c984b4dbde1367b4b29ecbdb1bc3b"
   },
   "note": "Native host, controller and separate-display SDK. The pinned CPU-console uploader is disabled; this experiment supplies its own renderer.",
+  "local_guest_audio_changes": {
+    "reason": "Add direct guest PCM submission based on the shipped SDK and scoped service interface evidence.",
+    "files": {
+      "include/gameshare/host.hpp": "02db9586ea571447a9c87b194c97ec386184dc362d2b050750d2416f91412adf",
+      "src/host.cpp": "75bf932e97d288061048c76c214a59ac43fdd9e53c9517ee7d185069bdfcc6a8",
+      "tests/native/lifecycle.cpp": "13630e9a1c82555ba9658a44716c1d8f9e9ed53a689bfb9352e68c5dd3bb9bfb",
+      "tests/native/run.py": "8417ee02f7ffe2ea3c6ece25735c69d7d322089475fe8630609f966a75b88911",
+      "README.md": "df69f1e226659d6a58567a2fb83fffe731cd68faaca8faed3b135498b4679eb9",
+      "docs/INTEGRATION.md": "af833918df887986481d5c3f82aacfe005acba19a4f3d549238e7ea71631607f",
+      "docs/NATIVE_CONTRACT.md": "6bbd9629acf799cea431d05ad0feb8f048140760a0c95448cedb2e70499e0d1a",
+      "docs/GUEST_AUDIO.md": "4b16d5d0a2269109f0ede5f0fb9c6a2ce389ddd7677430d374006f88894d3286"
+    }
+  },
   "cpu_renderer_reference": {
     "source": "https://github.com/ouncebrew/libounce/blob/main/nx/source/switch2/display/cpu_window.c",
     "sha256": "532c36af0444861f7a6de056ab2de98ffcfdd7f4176ca9cdea390ff7381f3e6d",

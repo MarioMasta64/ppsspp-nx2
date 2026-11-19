@@ -180,7 +180,6 @@ bool Switch2GameShareAvailable() { return false; }
 void Switch2GameShareToggle() {}
 void Switch2GameSharePoll() {}
 bool Switch2GameSharePrepareExit() { return true; }
-void Switch2GameShareMix(float *, int, int) {}
 
 extern "C" bool ppsspp_guest_start(const PpssppGuestHost *host) {
 	if (!host || host->version != 1 || guestThread.joinable()) {

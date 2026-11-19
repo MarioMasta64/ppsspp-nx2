@@ -6,4 +6,3 @@ void Switch2GameShareToggle();
 void Switch2GameSharePoll();
 // Requests shutdown and returns true only when ordinary renderer teardown is safe.
 bool Switch2GameSharePrepareExit();
-void Switch2GameShareMix(float *stereo, int frames, int rate);

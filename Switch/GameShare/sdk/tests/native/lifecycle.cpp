@@ -41,8 +41,10 @@ struct Model {
     unsigned failScoped = 0;
     bool cancelResponse = false, waitInApplet = false, audioFallback = false;
     bool multipleUsers = false, cancelSelector = false, waitInSelector = false;
-    bool expectInput = true;
+    bool expectInput = true, expectMirrorAudio = true;
     u8 videoMode = 0;
+    unsigned audioWrites = 0;
+    std::atomic<unsigned> audioPulls{0};
     std::atomic<bool> appletExited {false}, mapping {false}, inputReady {true};
     std::atomic<unsigned> connectionMask {1}, inputSamples {0}, connectionCalls {0};
     std::atomic<bool> blockConnection {false}, connectionBlocked {false};
@@ -159,7 +161,7 @@ public:
         if (model.initialized) {
             assert(position("guest:unmap") < position("target:retire"));
             assert(position("scoped:5") < position("target:retire"));
-            assert(position("audio:off") < position("target:retire"));
+            if (model.expectMirrorAudio) assert(position("audio:off") < position("target:retire"));
         }
         if (throwRetire) throw std::runtime_error("synthetic target retire exception");
         if (retireResult) return retireResult;
@@ -329,6 +331,21 @@ Result mockServiceDispatch(Service* service, u32 command, const void* in, size_t
         case 502: output(out, outSize, u8(0)); return 0;
         case 503: output(out, outSize, model.videoMode); return 0;
         case 510: assert(inSize == 16); return 0;
+        case 41:
+            assert(inSize == 0 && model.videoMode == 1);
+            output(out, outSize, u32(2048)); return 0;
+        case 42:
+            assert(input<u8>(in, inSize) == 0);
+            output(out, outSize, u32(model.audioWrites < 2 ? 2048 : 1024)); return 0;
+        case 40: {
+            const auto words = input<std::array<u32, 2>>(in, inSize);
+            assert(words[0] == 0 && words[1] == (model.audioWrites ? 384 : 512));
+            assert(!p.in_send_pid && p.buffer_attrs[0] == (SfBufferAttr_In | SfBufferAttr_HipcAutoSelect));
+            assert(p.buffers[0].size == words[1] * 4);
+            const auto* pcm = static_cast<const std::int16_t*>(p.buffers[0].ptr);
+            assert(pcm[0] == (model.audioWrites ? 256 : 0));
+            output(out, outSize, u32(model.audioWrites++ ? 384 : 128)); return 0;
+        }
         case 505:
             assert(input<u64>(in, inSize) == Sizes[0] && p.in_num_handles == 1);
             assert(model.handles.at(p.in_handles[0]) == "tm"); return 0;
@@ -507,7 +524,15 @@ int main(int argc, char** argv) {
     try {
       {
         gameshare::HostConfig config;
-        if (scenario == "no_audio") config.mirrorAudio = false;
+        const bool directAudio = scenario == "separate_audio" || scenario == "separate_audio_failure";
+        if (scenario == "no_audio" || directAudio) config.mirrorAudio = false;
+        if (directAudio) {
+            config.guestAudio = [](void*, std::int16_t* pcm, u32 frames) {
+                ++model.audioPulls;
+                for (u32 i = 0; i < frames * 2; ++i) pcm[i] = static_cast<std::int16_t>(i);
+            };
+            if (scenario == "separate_audio_failure") model.failScoped = 40;
+        }
         if (scenario == "no_input") config.readGuestInput = model.expectInput = false;
         if (scenario == "invalid_styles") config.supportedControllerStyles = 0;
         if (scenario == "invalid_timeout") config.matchTimeoutMs = 0;
@@ -527,6 +552,7 @@ int main(int argc, char** argv) {
                 provider = target;
             }
         }
+        model.expectMirrorAudio = config.mirrorAudio;
         Host backend(config);
         assert(backend.canUnload());
         UnblockOnExit release;
@@ -589,6 +615,14 @@ int main(int argc, char** argv) {
                 assert(count("guest:map") == 0);
             } else waitInput(backend);
             assert(count("scoped:500") == 1 && count("audio:on") == (config.mirrorAudio ? 1u : 0u));
+            if (directAudio) {
+                const unsigned writes = scenario == "separate_audio_failure" ? 1 : 2;
+                waitFor([&] { return count("scoped:40") >= writes; }, "direct audio did not write");
+                const auto polls = model.connectionCalls.load();
+                waitFor([&] { return model.connectionCalls >= polls + 3; }, "audio write stopped the session");
+                assert(count("scoped:41") == 1 && count("scoped:40") == writes && model.audioPulls == 1);
+                assert(backend.state() == Host::State::Hosting);
+            }
             if (scenario == "concurrent_hosts") {
                 Host second;
                 second.start();

@@ -10,7 +10,9 @@
 #include "Core/MemMap.h"
 #include <gameshare/host.hpp>
 #include <gameshare/guest_display.hpp>
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
@@ -27,7 +29,7 @@ struct Frame {
 	uint64_t serial;
 	std::vector<uint8_t> pixels;
 };
-std::atomic<bool> toggleRequested{false}, audioActive{false};
+std::atomic<bool> toggleRequested{false};
 struct Session {
 	std::shared_ptr<Switch2GuestCpuRenderer> renderer;
 	std::shared_ptr<gameshare::NativeGuestDisplay> display;
@@ -50,6 +52,14 @@ struct Session {
 	}
 	static void GuestLog(void *, const char *text) {
 		std::fprintf(stderr, "GameShare guest: %s\n", text);
+	}
+	static void GuestAudio(void *, int16_t *pcm, uint32_t frames) {
+		std::array<float, gameshare::GuestAudioMaxFrames * 2> samples{};
+		ppsspp_guest_mix(samples.data(), frames, 48000);
+		for (uint32_t i = 0; i < frames * 2; ++i) {
+			const float sample = std::isfinite(samples[i]) ? samples[i] : 0.0f;
+			pcm[i] = static_cast<int16_t>(std::clamp(sample, -1.0f, 1.0f) * 32767.0f);
+		}
 	}
 	static void FrameReady(void *user, const uint8_t *pixels, uint32_t width, uint32_t height, size_t stride) {
 		auto &s = *static_cast<Session *>(user);
@@ -124,7 +134,8 @@ struct Session {
 		gameshare::HostConfig config;
 		config.videoMode = gameshare::VideoMode::SeparateDisplay;
 		config.videoTarget = display;
-		config.mirrorAudio = true;
+		config.mirrorAudio = false;
+		config.guestAudio = GuestAudio;
 		config.log = Log;
 		host = std::make_unique<gameshare::Host>(config);
 		presenterStop = false;
@@ -134,7 +145,6 @@ struct Session {
 		Message("Starting GameShare. The guest has its own PPSSPP menu.");
 	}
 	void Stop() {
-		audioActive = false;
 		presenterStop = true;
 		frameCondition.notify_all();
 		ppsspp_guest_input(nullptr);
@@ -203,9 +213,7 @@ struct Session {
 			const PpssppGuestInput converted{input.buttons, input.leftX, input.leftY, input.rightX, input.rightY, input.connected};
 			ppsspp_guest_input(&converted);
 			ppsspp_guest_set_active(true);
-			audioActive = true;
 		} else {
-			audioActive = false;
 			ppsspp_guest_input(nullptr);
 			if (state != gameshare::Host::State::Starting) {
 				ppsspp_guest_set_active(false);
@@ -255,11 +263,3 @@ bool Switch2GameShareAvailable() { return true; }
 void Switch2GameShareToggle() { toggleRequested = true; }
 void Switch2GameSharePoll() { session.Poll(); }
 bool Switch2GameSharePrepareExit() { return session.PrepareExit(); }
-void Switch2GameShareMix(float *samples, int frames, int rate) {
-	if (!audioActive || frames < 1 || frames > 512) { return; }
-	std::array<float, 512 * 2> guest{};
-	ppsspp_guest_mix(guest.data(), frames, rate);
-	for (int i = 0; i < frames * 2; ++i) {
-		samples[i] = (samples[i] + guest[i]) * 0.5f;
-	}
-}

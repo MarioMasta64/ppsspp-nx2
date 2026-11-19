@@ -6,6 +6,8 @@
 #include <switch.h>
 #include <switch/applets/libapplet.h>
 #include <switch/applets/psel.h>
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -45,6 +47,14 @@ struct AudioConfig { u8 autoTune; u8 padding[3]; float speaker, tv, external; };
 static_assert(sizeof(MemoryConfig) == 8 && sizeof(InitializeConfig) == 16);
 static_assert(sizeof(GuestBuffers) == 32 && sizeof(MatchConfig) == 32);
 static_assert(sizeof(AudioConfig) == 16);
+struct GuestAudioWrite { u8 guest; u8 reserved[3]; u32 frames; };
+static_assert(sizeof(GuestAudioWrite) == 8 && offsetof(GuestAudioWrite, frames) == 4);
+constexpr u32 GuestAudioTargetFrames = 1024;
+struct GuestAudioFeed {
+    std::array<std::int16_t, GuestAudioMaxFrames * 2> pcm{};
+    u32 capacity = 0, pending = 0, offset = 0;
+    bool disabled = false, loggedWrite = false;
+};
 }
 
 struct Host::Impl {
@@ -337,6 +347,61 @@ struct Host::Impl {
         return check(serviceDispatchIn(&scoped, 4, guest), "enabling guest streaming") &&
                check(serviceDispatch(&scoped, 500), "starting native streaming");
     }
+    void disableGuestAudio(GuestAudioFeed& feed, const char* stage, Result rc) {
+        feed.disabled = true;
+        char text[128];
+        std::snprintf(text, sizeof(text), "GameShare: guest audio %s failed (0x%X).", stage, unsigned(rc));
+        log(LogLevel::Error, text);
+    }
+    void pumpGuestAudio(GuestAudioFeed& feed) {
+        if (!config.guestAudio || feed.disabled) return;
+        if (!feed.capacity) {
+            const Result rc = serviceDispatchOut(&scoped, 41, feed.capacity);
+            if (R_FAILED(rc) || !feed.capacity || feed.capacity > 48000) {
+                disableGuestAudio(feed, "capacity", R_FAILED(rc) ? rc : badInput());
+                return;
+            }
+            char message[96];
+            std::snprintf(message, sizeof(message), "GameShare: guest audio capacity %u frames.", unsigned(feed.capacity));
+            log(LogLevel::Info, message);
+        }
+        constexpr u8 guest = 0;
+        u32 free = 0;
+        Result rc = serviceDispatchInOut(&scoped, 42, guest, free);
+        if (R_FAILED(rc) || free > feed.capacity) {
+            disableGuestAudio(feed, "free space", R_FAILED(rc) ? rc : badInput());
+            return;
+        }
+        const u32 target = std::min(feed.capacity, GuestAudioTargetFrames);
+        const u32 filled = feed.capacity - free;
+        if (filled >= target) return;
+        u32 frames = std::min(target - filled, GuestAudioMaxFrames);
+        if (feed.pending) {
+            frames = std::min(frames, feed.pending);
+        } else {
+            try { config.guestAudio(config.guestAudioUser, feed.pcm.data(), frames); }
+            catch (...) { disableGuestAudio(feed, "callback", badInput()); return; }
+            feed.pending = frames;
+            feed.offset = 0;
+        }
+        const GuestAudioWrite request{guest, {}, frames};
+        u32 accepted = 0;
+        rc = serviceDispatchInOut(&scoped, 40, request, accepted,
+            .buffer_attrs = {SfBufferAttr_In | SfBufferAttr_HipcAutoSelect},
+            .buffers = {{feed.pcm.data() + feed.offset * 2, frames * 2 * sizeof(std::int16_t)}});
+        if (R_FAILED(rc) || accepted > frames) {
+            disableGuestAudio(feed, "submit PCM", R_FAILED(rc) ? rc : badInput());
+            return;
+        }
+        feed.offset += accepted;
+        feed.pending -= accepted;
+        if (accepted && !feed.loggedWrite) {
+            feed.loggedWrite = true;
+            char message[96];
+            std::snprintf(message, sizeof(message), "GameShare: guest audio accepted %u PCM frames.", unsigned(accepted));
+            log(LogLevel::Info, message);
+        }
+    }
     void poll() {
         status = State::Hosting;
         log(LogLevel::Info, config.videoMode == VideoMode::Mirror
@@ -344,6 +409,7 @@ struct Host::Impl {
         u64 lastSample = 0, lastSampleNumber = UINT64_MAX, nextAudio = nowMs() + 1000;
         const u64 connectionDeadline = nowMs() + 2000;
         bool guestSeen = false;
+        GuestAudioFeed guestAudioFeed;
         while (!stopping) {
             u32 connection[2]{};
             if (!check(serviceDispatchOut(&scoped, 8, connection), "checking guest connection")) return;
@@ -369,6 +435,7 @@ struct Host::Impl {
                     clearSample(); // Never leave a held button after stalled HID.
                 }
             }
+            pumpGuestAudio(guestAudioFeed);
             if (now >= nextAudio) {
                 if (!updateAudio()) return;
                 nextAudio = now + 1000;
@@ -473,6 +540,7 @@ void Host::start() {
     }
     if ((impl->config.videoMode != VideoMode::Mirror && impl->config.videoMode != VideoMode::SeparateDisplay) ||
         (impl->config.videoMode == VideoMode::SeparateDisplay && !impl->config.videoTarget) ||
+        (impl->config.guestAudio && (impl->config.videoMode != VideoMode::SeparateDisplay || impl->config.mirrorAudio)) ||
         !impl->config.supportedControllerStyles || (impl->config.supportedControllerStyles & ~7u) ||
         impl->config.matchTimeoutMs < 1000 || impl->config.matchTimeoutMs > 600000) {
         std::lock_guard<std::mutex> snapshot(impl->snapshotMutex);

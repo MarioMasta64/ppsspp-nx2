@@ -47,6 +47,7 @@ interface. **Factory3 does not select wire-protocol3.**
 |505|u64 size + one copy transfer handle|Register global buffer|
 |506|GuestBuffers32 + three copy transfer handles|Register guest buffers|
 |510|AudioConfig16|Current output configuration|
+|40–43|Guest PCM and queue queries|[Direct guest audio contract](GUEST_AUDIO.md)|
 |511|Recovered64-byte extended request|Alternate matching; unused here|
 
 MemoryConfig8 is `{u8 type,u8 mode,u16 zero,u32 guests}`. InitializeConfig16
