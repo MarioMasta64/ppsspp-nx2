@@ -41,7 +41,8 @@ hbmenu. The SDK explicitly requires this for uncertain native ownership.
 ## Isolation and rendering
 
 The build links a second PPSSPP frontend/core into a relocatable object and
-renames every defined core-owned global symbol together. Only eight plain-data
+renames every defined core-owned global symbol and ELF COMDAT group signature.
+Only eight plain-data
 C entry points are exported. The audit requires distinct Config, memory-base
 and core-state symbols; the host also compares their runtime addresses before
 starting. SDK/OS/C++ runtime entry points remain shared. The two emulators have
@@ -128,3 +129,29 @@ unrun for the existing missing `127.0.0.2` host loopback alias, causing the
 aggregate runner's failure status. No executed regression test failed.
 Console dual-instance rendering, pairing, guest controls/audio and sustained
 performance still require physical qualification.
+
+## First console launch investigation (2026-11-19)
+
+The initial experimental build produced a system error before the PPSSPP menu.
+Its boot log reached display configuration; native fault/exit records remained
+empty. The separate working single-instance installation is unchanged. Pairing
+and the second emulator have not yet been reached on the console.
+
+The SDK bridge is compiled as C++20 separately from the C++17 frontend. Startup
+checkpoints around Vulkan initialization write `startup-stage.bin` directly
+with native flushes. Its four little-endian 64-bit words are magic
+`0x3254475350505350`, stage number, recorder address and system tick. Stages
+1–4 cover diagnostics, display configuration, graphics-object construction and
+error-string construction; stages 10 and 11 bracket InitAPI's initial string
+assignment. Stages 20 and 21 bracket NativeInit, and 22 precedes window setup.
+The diagnostic boot marker is `comdat-isolation`. The native exit recorder
+also wraps `svcBreak` (kind 6, reason in the high 32 bits and a readable four-byte
+detail in the low 32 bits).
+
+The final ELF showed that the linker turned a required host string-constructor
+call into a no-op. GCC used a local C5 signature for the constructor group.
+Renaming only global symbols let the guest group retain that signature, causing
+the linker to discard the host copy. The build now renames and checks all 7,351
+guest COMDAT groups in addition to the global symbol audit. Disassembly of the
+corrected ELF confirms that host startup calls its own string constructor and
+the guest constructor has a distinct address.

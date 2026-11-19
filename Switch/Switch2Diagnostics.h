@@ -4,3 +4,4 @@
 
 void Switch2DiagnosticsInit(const char *directory = "sdmc:/switch/ppsspp-switch2/");
 void Switch2DiagnosticsShutdown();
+void Switch2DiagnosticsCheckpoint(unsigned int stage);

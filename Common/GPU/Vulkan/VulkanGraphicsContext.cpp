@@ -48,6 +48,9 @@
 
 #include "Common/DbgNew.h"
 #include <sstream>
+#if defined(__SWITCH2__)
+#include "Switch/Switch2Diagnostics.h"
+#endif
 
 #include "Core/Config.h"
 #include "Core/ConfigValues.h"
@@ -162,7 +165,13 @@ private:
 };
 
 bool VulkanGraphicsContext::InitAPI(void *wnd, std::string *deviceName, std::string *errorMessage) {
+#if defined(__SWITCH2__)
+	Switch2DiagnosticsCheckpoint(10);
+#endif
 	*errorMessage = "N/A";
+#if defined(__SWITCH2__)
+	Switch2DiagnosticsCheckpoint(11);
+#endif
 	_dbg_assert_(deviceName);
 
 	if (vulkan_) {
@@ -170,7 +179,13 @@ bool VulkanGraphicsContext::InitAPI(void *wnd, std::string *deviceName, std::str
 		return false;
 	}
 
+#if defined(__SWITCH2__)
+	std::fprintf(stderr, "Vulkan init: glslang begin (offscreen=%d config=%p)\n", offscreenWidth_, static_cast<void *>(&g_Config));
+#endif
 	init_glslang();
+#if defined(__SWITCH2__)
+	std::fprintf(stderr, "Vulkan init: glslang ready, loading API\n");
+#endif
 
 	g_LogOptions.breakOnError = true;
 	g_LogOptions.breakOnWarning = true;
@@ -184,6 +199,9 @@ bool VulkanGraphicsContext::InitAPI(void *wnd, std::string *deviceName, std::str
 	}
 
 	vulkan_ = new VulkanContext();
+#if defined(__SWITCH2__)
+	std::fprintf(stderr, "Vulkan init: API loaded, creating instance\n");
+#endif
 
 	vr_ = offscreenWidth_ == 0 && IsVREnabled() && VR_VulkanSupported();
 
@@ -198,6 +216,9 @@ bool VulkanGraphicsContext::InitAPI(void *wnd, std::string *deviceName, std::str
 		vulkan_ = nullptr;
 		return false;
 	}
+#if defined(__SWITCH2__)
+	std::fprintf(stderr, "Vulkan init: instance ready\n");
+#endif
 	int deviceNum = vulkan_->GetPhysicalDeviceByName(*deviceName);
 	if (vr_) {
 		// The runtime decides, it has to be the GPU the headset is on.
@@ -214,12 +235,18 @@ bool VulkanGraphicsContext::InitAPI(void *wnd, std::string *deviceName, std::str
 	}
 
 	static const std::vector<const char *> noExtensions;
+#if defined(__SWITCH2__)
+	std::fprintf(stderr, "Vulkan init: creating device %d\n", deviceNum);
+#endif
 	if (vulkan_->CreateDevice(deviceNum, vr_ ? VR_GetVulkanDeviceExtensions() : noExtensions) != VK_SUCCESS) {
 		*errorMessage = vulkan_->InitError();
 		delete vulkan_;
 		vulkan_ = nullptr;
 		return false;
 	}
+#if defined(__SWITCH2__)
+	std::fprintf(stderr, "Vulkan init: device ready\n");
+#endif
 	// Normally the queue is picked along with the surface, which must be able to present from it.
 	if ((offscreenWidth_ > 0 || vr_) && !vulkan_->ChooseGraphicsQueueWithoutSurface()) {
 		*errorMessage = "No graphics queue";
@@ -229,6 +256,9 @@ bool VulkanGraphicsContext::InitAPI(void *wnd, std::string *deviceName, std::str
 }
 
 bool VulkanGraphicsContext::InitSurface(WindowSystem winsys, void *data1, void *data2, std::string *errorMessage) {
+#if defined(__SWITCH2__)
+	std::fprintf(stderr, "Vulkan surface: begin (offscreen=%d)\n", offscreenWidth_);
+#endif
 	if (offscreenWidth_ > 0) {
 		auto presentation = std::make_unique<VulkanOffscreenPresentation>(VK_FORMAT_B8G8R8A8_UNORM, VkExtent2D{ (uint32_t)offscreenWidth_, (uint32_t)offscreenHeight_ });
 		if (!presentation->Create(vulkan_)) {

@@ -1561,7 +1561,7 @@ if(TargetBin)
 endif()
 
 if(NINTENDO_SWITCH2)
-	target_link_options(${TargetBin} PRIVATE "-Wl,--wrap=exit,--wrap=_exit,--wrap=abort,--wrap=diagAbortWithResult,--wrap=fatalThrow")
+	target_link_options(${TargetBin} PRIVATE "-Wl,--wrap=exit,--wrap=_exit,--wrap=abort,--wrap=diagAbortWithResult,--wrap=fatalThrow,--wrap=svcBreak")
 	find_package(Python3 COMPONENTS Interpreter REQUIRED)
 	include(Switch/GameShare/Build.cmake)
 	if(PPSSPP_SWITCH2_GAMESHARE)

@@ -9,6 +9,8 @@
 namespace {
 FsFile faultFile{};
 FsFile exitFile{};
+FsFile stageFile{};
+bool stageFileOpen = false;
 bool faultFileOpen = false;
 bool exitFileOpen = false;
 unsigned char recordingFault = 0;
@@ -66,6 +68,7 @@ void __real__exit(int status) __attribute__((noreturn));
 void __real_abort() __attribute__((noreturn));
 void __real_diagAbortWithResult(Result rc) __attribute__((noreturn));
 void __real_fatalThrow(Result rc) __attribute__((noreturn));
+Result __real_svcBreak(uint32_t reason, uintptr_t address, uintptr_t size);
 
 void __wrap_exit(int status) {
 	RecordExit(1, static_cast<u64>(status));
@@ -86,6 +89,19 @@ void __wrap_diagAbortWithResult(Result rc) {
 void __wrap_fatalThrow(Result rc) {
 	RecordExit(5, rc);
 	__real_fatalThrow(rc);
+}
+
+Result __wrap_svcBreak(uint32_t reason, uintptr_t address, uintptr_t size) {
+	uint32_t detail = 0;
+	MemoryInfo info{};
+	uint32_t page = 0;
+	if (size == sizeof(detail) && R_SUCCEEDED(svcQueryMemory(&info, &page, address)) &&
+		(info.perm & Perm_R) && info.size >= sizeof(detail) && address >= info.addr &&
+		address - info.addr <= info.size - sizeof(detail)) {
+		memcpy(&detail, reinterpret_cast<const void *>(address), sizeof(detail));
+	}
+	RecordExit(6, (static_cast<u64>(reason) << 32) | detail);
+	return __real_svcBreak(reason, address, size);
 }
 
 void __libnx_exception_handler(ThreadExceptionDump *context) {
@@ -170,9 +186,29 @@ void Switch2DiagnosticsInit(const char *directory) {
 		}
 	}
 	std::fprintf(stderr, "Native exit recorder: %08x\n", rc);
+	if (std::snprintf(path, sizeof(path), "%sstartup-stage.bin", relative) < sizeof(path)) {
+		fsFsCreateFile(sd, path, 32, 0);
+		rc = fsFsOpenFile(sd, path, FsOpenMode_Write, &stageFile);
+		stageFileOpen = R_SUCCEEDED(rc);
+	}
+}
+
+void Switch2DiagnosticsCheckpoint(unsigned int stage) {
+	if (stageFileOpen) {
+		const u64 record[4] = {0x3254475350505350ULL, stage,
+			reinterpret_cast<u64>(&Switch2DiagnosticsCheckpoint), svcGetSystemTick()};
+		const Result rc = fsFileWrite(&stageFile, 0, record, sizeof(record), FsWriteOption_Flush);
+		std::fprintf(stderr, "Startup stage %u: write=%08x fault=%d exit=%d\n", stage, rc, faultFileOpen, exitFileOpen);
+	} else {
+		std::fprintf(stderr, "Startup stage %u: recorder closed (fault=%d exit=%d)\n", stage, faultFileOpen, exitFileOpen);
+	}
 }
 
 void Switch2DiagnosticsShutdown() {
+	if (stageFileOpen) {
+		stageFileOpen = false;
+		fsFileClose(&stageFile);
+	}
 	if (exitFileOpen) {
 		exitFileOpen = false;
 		fsFileClose(&exitFile);

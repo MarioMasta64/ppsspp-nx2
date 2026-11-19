@@ -235,6 +235,8 @@ int main(int argc, char *argv[]) {
 	setvbuf(stderr, nullptr, _IONBF, 0);
 	std::fprintf(stderr, "PPSSPP Switch 2 startup\n");
 	Switch2DiagnosticsInit(DATA_PATH);
+	Switch2DiagnosticsCheckpoint(1);
+	std::fprintf(stderr, "Startup diagnostic revision: comdat-isolation\n");
 	Result rc = romfsInit();
 	if (R_FAILED(rc))
 		return ShowStartupError("Could not mount embedded assets");
@@ -261,7 +263,9 @@ int main(int argc, char *argv[]) {
 	if (!options.log.has_value())
 		options.log = std::string(DATA_PATH) + "ppsspp.log";
 	options.gpuBackend = GPUBackend::VULKAN;
+	Switch2DiagnosticsCheckpoint(20);
 	NativeInit(argc, const_cast<const char **>(argv), options, DATA_PATH, "sdmc:/", DATA_PATH);
+	Switch2DiagnosticsCheckpoint(21);
 	if (g_Config.bFirstRun)
 		g_Config.iInternalResolution = 1;
 	g_Config.bShowTouchControls = false;
@@ -275,6 +279,7 @@ int main(int argc, char *argv[]) {
 #endif
 	}
 	// Request 120 Hz where supported, retaining 60 Hz display compatibility.
+	Switch2DiagnosticsCheckpoint(22);
 	rc = nwindowSetModeDimensions(nwindowGetDefault(), 1920, 1080, 1920, 1080);
 	if (R_SUCCEEDED(rc)) {
 		rc = nwindowSetFrameRates(nwindowGetDefault(), 120, 60, true);
@@ -290,8 +295,11 @@ int main(int argc, char *argv[]) {
 	}
 	nwindowGetDimensions(nwindowGetDefault(), &displayWidth, &displayHeight);
 	std::fprintf(stderr, "Display: %ux%u, requested 120 fps (60 fps fallback), VRR allowed\n", displayWidth, displayHeight);
+	Switch2DiagnosticsCheckpoint(2);
 	VulkanGraphicsContext graphics;
+	Switch2DiagnosticsCheckpoint(3);
 	std::string error;
+	Switch2DiagnosticsCheckpoint(4);
 	bool apiReady = graphics.InitAPI(nullptr, &g_Config.sVulkanDevice, &error);
 	if (apiReady) {
 		auto *vulkan = static_cast<VulkanContext *>(graphics.GetAPIContext());

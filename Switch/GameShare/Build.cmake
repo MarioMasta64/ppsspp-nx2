@@ -35,12 +35,14 @@ target_link_libraries(PPSSPPSwitch2GuestFrontend PRIVATE ppsspp_ui)
 set(guest_object "${CMAKE_BINARY_DIR}/gameshare/guest-core.o")
 add_custom_command(OUTPUT "${guest_object}"
 	COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Tools/isolate-switch2-guest.py"
-		--ld "${CMAKE_LINKER}" --nm "${CMAKE_NM}" --objcopy "${CMAKE_OBJCOPY}"
+		--ld "${CMAKE_LINKER}" --nm "${CMAKE_NM}" --objcopy "${CMAKE_OBJCOPY}" --readelf "${CMAKE_READELF}"
 		--output "${guest_object}" --object $<TARGET_OBJECTS:PPSSPPSwitch2GuestFrontend> ${guest_archives}
 	DEPENDS PPSSPPSwitch2GuestFrontend ${guest_libraries} "${CMAKE_SOURCE_DIR}/Tools/isolate-switch2-guest.py"
 	COMMAND_EXPAND_LISTS VERBATIM)
 set_source_files_properties("${guest_object}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
-target_sources(${TargetBin} PRIVATE "${guest_object}" Switch/GameShare/Integration.cpp Switch/GameShare/CpuRenderer.cpp)
+target_sources(${TargetBin} PRIVATE "${guest_object}")
+add_library(PPSSPPSwitch2GameShareBridge STATIC Switch/GameShare/Integration.cpp Switch/GameShare/CpuRenderer.cpp)
 set(GAMESHARE_ENABLE_CPU_STREAMER OFF CACHE BOOL "" FORCE)
 add_subdirectory(Switch/GameShare/sdk)
-target_link_libraries(${TargetBin} gameshare::gameshare)
+target_link_libraries(PPSSPPSwitch2GameShareBridge PRIVATE gameshare::gameshare Core)
+target_link_libraries(${TargetBin} PPSSPPSwitch2GameShareBridge)
