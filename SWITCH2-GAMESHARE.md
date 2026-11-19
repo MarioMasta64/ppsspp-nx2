@@ -180,8 +180,14 @@ PPSSPP screens. Both emulator audio streams were audible from the host. The
 console-confirmed NRO, matching ELF and installation receipt are saved under
 `dist-switch2-gameshare/checkpoints/dual-screen-controls/`.
 
-The current audio test build sends the same mixed PCM through Audren so a
-device test can establish whether the stock client receives audio from that
-backend. It falls back to AudOut if Audren setup fails. The GameShare SDK's
-audio flag is application-scoped. Per-console audio routing and audible output
-on the client still require separate verification.
+The client was silent in separate-display sessions with both AudOut and
+Audren. The Audren test boot log confirms the application mix used Audren,
+the guest received frames and SDK cleanup completed. The launcher NRO was
+restored to the console-confirmed dual-screen build using the saved SD-card
+copy. The renderer trial is recorded in commit `c5a8716`.
+
+The validated audio path currently plays both games on the host. The SDK
+exposes an application-wide mirroring flag and device-volume configuration.
+A separate guest audio route remains unverified. Another audio backend
+replacement should be preceded by evidence of a native guest audio route or a
+controlled mirror-mode comparison.
