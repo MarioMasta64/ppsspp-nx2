@@ -207,7 +207,9 @@ configuration. Other JIT optimizations remain available. This is a qualified
 workaround; the underlying static-allocation failure is not yet explained.
 Regression risk is Switch 2 JIT performance relative to that optimization;
 this does not change the PSP clock, emulated instruction semantics or
-serialized state. Sound, measured FPS and sustained play remain unqualified.
+serialized state. The user confirmed that the final native build `a5913fb`
+runs Tekken with JIT and working game audio. Measured FPS and sustained play
+remain unqualified.
 
 One intermittent crash before the PPSSPP menu was reported. The following
 launch succeeded, replacing that run's logs, so its cause remains unknown.
@@ -218,3 +220,11 @@ single-instance cases and all ten paired relay scenarios. Eleven paired P2P
 scenarios remain unrun because this Mac lacks the required `127.0.0.2` alias;
 the aggregate runner consequently returned failure. No new executed test
 failures were observed. Native compilation and package/icon validation passed.
+
+The console-confirmed NRO is 48,979,116 bytes, with local SHA-256
+`9f80a4e348b92943707f29e59f2cf7240ebd17e180e91db658fdb243fbb13b61`.
+The successful confirmation used normal JIT configuration (`CPUCore=1`,
+`JitDisableFlags=0`); static allocation is disabled in the native backend.
+FTP installation and settings restoration returned `226 OK`, with no NRO
+validation download. The PPSSPP logo and 1080p/120-Hz request are included.
+The earlier intermittent pre-menu crash remains unexplained.
