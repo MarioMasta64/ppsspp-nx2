@@ -1561,6 +1561,7 @@ if(TargetBin)
 endif()
 
 if(NINTENDO_SWITCH2)
+	target_link_options(${TargetBin} PRIVATE "-Wl,--wrap=exit,--wrap=_exit,--wrap=abort,--wrap=diagAbortWithResult,--wrap=fatalThrow")
 	nx_generate_nacp("${CMAKE_BINARY_DIR}/ppsspp-switch2.nacp" NAME "PPSSPP Switch 2" AUTHOR "PPSSPP contributors" VERSION "0.1.0")
 	find_package(Python3 COMPONENTS Interpreter REQUIRED)
 	file(GLOB_RECURSE SWITCH2_RUNTIME_ASSETS CONFIGURE_DEPENDS LIST_DIRECTORIES false "${CMAKE_SOURCE_DIR}/assets/*")

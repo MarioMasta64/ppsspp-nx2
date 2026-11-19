@@ -7,8 +7,43 @@
 
 namespace {
 FsFile faultFile{};
+FsFile exitFile{};
 bool faultFileOpen = false;
+bool exitFileOpen = false;
 unsigned char recordingFault = 0;
+unsigned char recordingExit = 0;
+
+struct ExitRecord {
+	u64 magic;
+	u64 recorderAddress;
+	u64 kind;
+	u64 result;
+	u64 tick;
+	u64 returnAddresses[24];
+};
+
+__attribute__((noinline)) void RecordExit(u64 kind, u64 result) {
+	if (!exitFileOpen || __atomic_test_and_set(&recordingExit, __ATOMIC_RELAXED)) {
+		return;
+	}
+	ExitRecord record{0x3154495845505050ULL, reinterpret_cast<u64>(&RecordExit), kind, result, svcGetSystemTick(), {}};
+	u64 frame = reinterpret_cast<u64>(__builtin_frame_address(0));
+	for (size_t i = 0; i < 24 && frame && !(frame & 15); ++i) {
+		MemoryInfo info{};
+		u32 pageInfo = 0;
+		if (R_FAILED(svcQueryMemory(&info, &pageInfo, frame)) || !(info.perm & Perm_R) ||
+			info.size < 16 || frame < info.addr || frame - info.addr > info.size - 16) {
+			break;
+		}
+		const auto *saved = reinterpret_cast<const u64 *>(frame);
+		record.returnAddresses[i] = saved[1];
+		if (saved[0] <= frame) {
+			break;
+		}
+		frame = saved[0];
+	}
+	fsFileWrite(&exitFile, 0, &record, sizeof(record), FsWriteOption_Flush);
+}
 
 struct FaultRecord {
 	u64 magic;
@@ -24,6 +59,33 @@ extern "C" {
 // The SDK switches to this stack before invoking the diagnostic hook.
 alignas(16) u8 __nx_exception_stack[0x10000];
 u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
+
+void __real_exit(int status) __attribute__((noreturn));
+void __real__exit(int status) __attribute__((noreturn));
+void __real_abort() __attribute__((noreturn));
+void __real_diagAbortWithResult(Result rc) __attribute__((noreturn));
+void __real_fatalThrow(Result rc) __attribute__((noreturn));
+
+void __wrap_exit(int status) {
+	RecordExit(1, static_cast<u64>(status));
+	__real_exit(status);
+}
+void __wrap__exit(int status) {
+	RecordExit(2, static_cast<u64>(status));
+	__real__exit(status);
+}
+void __wrap_abort() {
+	RecordExit(3, 0);
+	__real_abort();
+}
+void __wrap_diagAbortWithResult(Result rc) {
+	RecordExit(4, rc);
+	__real_diagAbortWithResult(rc);
+}
+void __wrap_fatalThrow(Result rc) {
+	RecordExit(5, rc);
+	__real_fatalThrow(rc);
+}
 
 void __libnx_exception_handler(ThreadExceptionDump *context) {
 	if (!faultFileOpen || __atomic_test_and_set(&recordingFault, __ATOMIC_RELAXED)) {
@@ -58,9 +120,29 @@ void Switch2DiagnosticsInit() {
 		}
 	}
 	std::fprintf(stderr, "Native fault recorder: %08x\n", rc);
+	constexpr const char *exitPath = "/switch/ppsspp-switch2/native-exit.bin";
+	fsFsCreateFile(sd, exitPath, sizeof(ExitRecord), 0);
+	rc = fsFsOpenFile(sd, exitPath, FsOpenMode_Write, &exitFile);
+	if (R_SUCCEEDED(rc)) {
+		rc = fsFileSetSize(&exitFile, sizeof(ExitRecord));
+		const ExitRecord empty{};
+		if (R_SUCCEEDED(rc)) {
+			rc = fsFileWrite(&exitFile, 0, &empty, sizeof(empty), FsWriteOption_Flush);
+		}
+		if (R_SUCCEEDED(rc)) {
+			exitFileOpen = true;
+		} else {
+			fsFileClose(&exitFile);
+		}
+	}
+	std::fprintf(stderr, "Native exit recorder: %08x\n", rc);
 }
 
 void Switch2DiagnosticsShutdown() {
+	if (exitFileOpen) {
+		exitFileOpen = false;
+		fsFileClose(&exitFile);
+	}
 	if (faultFileOpen) {
 		faultFileOpen = false;
 		fsFileClose(&faultFile);

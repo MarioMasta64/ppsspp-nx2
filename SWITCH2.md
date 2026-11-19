@@ -175,3 +175,12 @@ runtime handler address anchors symbolization against the matching ELF.
 The file is cleared on each launch; a zero header means no fault was recorded.
 This is best-effort diagnosis, not exception recovery. Normal main-loop exit
 is logged separately in `boot.log`. Retrieve diagnostic files before relaunch.
+
+The first instrumented interpreter run returned to hbmenu without populating
+the exception record or logging normal main-loop completion. Explicit exit,
+abort, fatal and diagnostic-abort calls are therefore also traced into
+`native-exit.bin`. It contains magic `0x3154495845505050`, a recorder-address
+anchor, kind (1 exit, 2 _exit, 3 abort, 4 diagnostic abort, 5 fatal), result,
+system tick and up to 24 return addresses. Each frame read is bounded by a
+successful readable-memory query. Both recorders preserve the original SDK
+termination behavior and clear their previous report at launch.
