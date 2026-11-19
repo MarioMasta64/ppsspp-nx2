@@ -137,5 +137,6 @@ state, so a second thread alone is not an independent emulator instance.
   `c8a75d31128e3d8a1499907035dd61673c9c69ab06a919a20cd2749dcd4492fb`.
 - FTP installation returned `226 OK` for
   `sdmc:/switch/ppsspp-switch2/ppsspp-switch2.nro`; no validation download.
-- Console UI, controls, audible output, game loading and sustained speed
+- The user confirmed that the PPSSPP menu appears on Switch 2 and controller
+  navigation works. Audible output, game loading and sustained speed still
   await device qualification.
