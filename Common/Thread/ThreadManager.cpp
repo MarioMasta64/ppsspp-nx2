@@ -10,6 +10,9 @@
 #include "Common/Log.h"
 #include "Common/Thread/ThreadUtil.h"
 #include "Common/Thread/ThreadManager.h"
+#if defined(__SWITCH2__)
+#include "Switch/Switch2TaskThreads.h"
+#endif
 
 // Threads and task scheduling
 //
@@ -26,6 +29,9 @@ static constexpr size_t TASK_PRIORITY_COUNT = (size_t)TaskPriority::COUNT;
 ThreadManager g_threadManager;
 
 struct GlobalThreadContext {
+#if defined(__SWITCH2__)
+	Switch2TaskThreads dedicatedThreads;
+#endif
 	std::mutex mutex;
 	std::deque<Task *> compute_queue[TASK_PRIORITY_COUNT];
 	std::atomic<int> compute_queue_size;
@@ -66,6 +72,10 @@ ThreadManager::~ThreadManager() {
 }
 
 void ThreadManager::Teardown() {
+#if defined(__SWITCH2__)
+	// Dedicated tasks may still use pool workers before shutdown.
+	global_->dedicatedThreads.Join();
+#endif
 	for (TaskThreadContext *&threadCtx : global_->threads_) {
 		std::unique_lock<std::mutex> lock(threadCtx->mutex);
 		threadCtx->cancelled = true;
@@ -226,12 +236,20 @@ void ThreadManager::Init(int numRealCores, int numLogicalCoresPerCpu) {
 
 void ThreadManager::EnqueueTask(Task *task) {
 	if (task->Type() == TaskType::DEDICATED_THREAD) {
+#if defined(__SWITCH2__)
+		global_->dedicatedThreads.Start([task] {
+			SetCurrentThreadName("DedicatedThreadTask");
+			task->Run();
+			task->Release();
+		});
+#else
 		std::thread th([=](Task *task) {
 			SetCurrentThreadName("DedicatedThreadTask");
 			task->Run();
 			task->Release();
 		}, task);
 		th.detach();
+#endif
 		return;
 	}
 

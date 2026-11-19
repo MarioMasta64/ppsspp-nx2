@@ -17,3 +17,11 @@ with tempfile.TemporaryDirectory(prefix="ppsspp-switch2-jit-") as temp:
         result = subprocess.run([str(binary), case], capture_output=True)
         assert result.returncode == -signal.SIGABRT, (case, result.returncode, result.stderr)
     print("Switch 2 JIT publication: staging, batching, bounds, release/reuse passed")
+
+with tempfile.TemporaryDirectory(prefix="ppsspp-switch2-threads-") as temp:
+    binary = Path(temp) / "task-threads"
+    subprocess.run([os.environ.get("CXX", "c++"), "-std=c++17", "-pthread",
+                    "-fsanitize=address,undefined", "-g", "-I", str(root),
+                    str(root / "Switch/tests/task_threads.cpp"), "-o", str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=30)
+    print("Switch 2 dedicated tasks: asynchronous execution, nested jobs, concurrent submission and shutdown passed")

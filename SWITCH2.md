@@ -184,3 +184,15 @@ anchor, kind (1 exit, 2 _exit, 3 abort, 4 diagnostic abort, 5 fatal), result,
 system tick and up to 24 return addresses. Each frame read is bounded by a
 successful readable-memory query. Both recorders preserve the original SDK
 termination behavior and clear their previous report at launch.
+
+The exit trace for revision `291ecd5` identified `abort` through
+`std::thread::detach`, called by `ThreadManager::EnqueueTask` during the first
+Vulkan game-shader compilation. Switch 2 dedicated tasks now retain joinable
+threads, reap completed jobs at the next submission and join outstanding jobs
+before pool shutdown. Dedicated work still starts immediately and stays off
+the shared pool. Other platforms keep their existing detach path. The focused
+sanitizer checks cover asynchronous execution, nested jobs during shutdown,
+concurrent producers, reuse and destructor cleanup. Regression risk is worker
+lifetime and shutdown ordering; a stuck dedicated task can delay shutdown.
+This fixes the traced termination path; Tekken gameplay and the original
+ARM64-JIT guest-memory error still require console qualification.
