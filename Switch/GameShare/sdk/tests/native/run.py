@@ -11,7 +11,9 @@ sdk = here.parents[1]
 scenarios = (
     "success", "cancel", "prepare_failure", "disconnect", "admission_grace",
     "blocked_snapshot", "cancel_waiting", "audio_fallback", "selector_success",
-    "selector_cancel", "selector_cancel_waiting", "no_audio", "no_input",
+    "selector_cancel", "selector_cancel_waiting", "locked_launch",
+    "locked_cached_launch", "locked_no_launch",
+    "locked_bad_launch", "no_audio", "no_input",
     "invalid_styles", "invalid_timeout", "invalid_mode", "concurrent_hosts",
     "separate_success", "separate_audio", "separate_audio_failure",
     "separate_missing_target", "separate_open_failure",

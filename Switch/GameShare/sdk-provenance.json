@@ -71,5 +71,16 @@
     "source": "https://github.com/ouncebrew/libounce/blob/main/nx/source/switch2/display/cpu_window.c",
     "sha256": "532c36af0444861f7a6de056ab2de98ffcfdd7f4176ca9cdea390ff7381f3e6d",
     "note": "Public native CPU-image geometry and setup sequence. The app supplies separate ownership/retirement and reuses OunceVK frame registration."
+  },
+  "local_launch_profile_changes": {
+    "reason": "Honor the OS-provided launch profile for a title that locks profile switching.",
+    "files": {
+      "docs/NATIVE_CONTRACT.md": "150df40d119c4674c2f18359c865526fa93888ba30891f6fbfa502dfea5e7874",
+      "src/host.cpp": "5a5d85f351ff8d6d6d455cd12b9b61b28d2c1e68b1a42c1a36be51eec61295d6",
+      "tests/native/README.md": "bc2b15648607f2b057797156fcea85f19765960fd307d2c0403d41fa2debd6bf",
+      "tests/native/fakes/switch.h": "0e51b3bd103961481deb624f97cc8f126b9b0767dd79f62593b81a78d67b7e8d",
+      "tests/native/lifecycle.cpp": "aa17680a1b8e4234e189041f50809a8f57694e682a86f2de2470e575d1976ae2",
+      "tests/native/run.py": "8a277369276f1c4276006faedea9b17b44c22c432ebbaa3999d30a95bd00b8d7"
+    }
   }
 }

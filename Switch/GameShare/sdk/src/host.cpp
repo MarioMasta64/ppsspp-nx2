@@ -34,6 +34,39 @@ u64 nowMs() {
 }
 void sleepMs(u64 ms) { svcSleepThread(ms * 1000000); }
 Result badInput() { return MAKERESULT(Module_Libnx, LibnxError_BadInput); }
+
+AccountUid preselectedApplicationUser() {
+    // The applet launch parameter is consumed when popped. Keep its validated
+    // identity available for later GameShare sessions in this process.
+    static const AccountUid selected = [] {
+        struct LaunchProfile {
+            u32 magic;
+            u8 selected;
+            u8 reserved[3];
+            AccountUid uid;
+        };
+        static_assert(sizeof(LaunchProfile) == 0x18 && offsetof(LaunchProfile, uid) == 8);
+        // The launcher can preserve the same process's launch selection
+        // across NRO loads, including after another NRO read the parameter.
+        AccountUid* loaderUser = envGetUserIdStorage();
+        AppletStorage storage{};
+        if (R_FAILED(appletPopLaunchParameter(&storage, AppletLaunchParameterKind_PreselectedUser))) {
+            return loaderUser ? *loaderUser : AccountUid{};
+        }
+        s64 size = 0;
+        LaunchProfile profile{};
+        const Result rc = appletStorageGetSize(&storage, &size);
+        const bool valid = R_SUCCEEDED(rc) && size >= 0x88 &&
+            R_SUCCEEDED(appletStorageRead(&storage, 0, &profile, sizeof(profile))) &&
+            profile.magic == 0xc79497ca && profile.selected == 1 && accountUidIsValid(&profile.uid);
+        appletStorageClose(&storage);
+        if (!valid) return AccountUid{};
+        if (loaderUser) *loaderUser = profile.uid;
+        return profile.uid;
+    }();
+    return selected;
+}
+
 struct MemoryConfig { u8 type, mode; u16 reserved; u32 guests; };
 struct InitializeConfig { MemoryConfig config; u64 pid; };
 struct GuestBuffers { u32 guest, reserved; u64 sizes[3]; };
@@ -159,6 +192,20 @@ struct Host::Impl {
         appletHolderClose(&holder); holderCreated = holderStarted = false;
         return check(rc, "validating native applet result");
     }
+    bool selectLaunchUser(unsigned openCount) {
+        uid = preselectedApplicationUser();
+        if (accountUidIsValid(&uid)) {
+            log(LogLevel::Info, "GameShare: using the launch title's selected profile.");
+            return true;
+        }
+        char text[240];
+        std::snprintf(text, sizeof(text),
+            "GameShare: the launch title locks profile switching and supplied no valid launch profile (%u open).",
+            openCount);
+        failure = text;
+        log(LogLevel::Error, text);
+        return false;
+    }
     bool selectUser() {
         if (!check(open("acc:u0", &account), "opening account service")) return false;
         const u64 zero = 0;
@@ -170,34 +217,41 @@ struct Host::Impl {
                 .buffers = {{users, sizeof(users)}}), "reading open users")) return false;
         unsigned count = 0;
         while (count < ACC_USER_LIST_SIZE && accountUidIsValid(&users[count])) ++count;
-        if (count == 1) uid = users[0];
-        else {
+        if (count == 1) {
+            uid = users[0];
+        } else {
             u8 locked = 0;
             if (!check(serviceDispatchOut(&account, 150, locked), "reading account switch lock")) return false;
-            if (locked) return check(badInput(), "selecting the application's user");
-            std::memset(users, 0, sizeof(users));
-            if (!check(serviceDispatch(&account, 2,
-                    .buffer_attrs = {SfBufferAttr_Out | SfBufferAttr_HipcPointer},
-                    .buffers = {{users, sizeof(users)}}), "reading local users")) return false;
-            count = 0;
-            while (count < ACC_USER_LIST_SIZE && accountUidIsValid(&users[count])) ++count;
-            if (count == 1) uid = users[0];
-            else {
-                // Use the public player-selector ABI with our own cancellable
-                // holder. No global account singleton or new-user flow.
-                PselUiSettings settings{};
-                if (!check(pselUiCreate(&settings, PselUiMode_UserSelector), "creating user selector")) return false;
-                settings.settings.unk_x97 = 1;
-                PselUiReturnArg selected{};
-                if (!openApplet(static_cast<AppletId>(0x01000010), 0x20000, &settings, sizeof(settings)) ||
-                    !waitApplet() || !readAppletOutput(&selected, sizeof(selected))) return false;
-                if (R_FAILED(selected.res) || !accountUidIsValid(&selected.user_id)) { cancelled = true; return false; }
-                uid = selected.user_id;
+            if (locked) {
+                if (!selectLaunchUser(count)) return false;
+            } else if (!selectLocalUser()) {
+                return false;
             }
         }
         if (!accountUidIsValid(&uid)) return check(badInput(), "validating selected user");
         return check(serviceDispatchIn(&account, 101, uid,
             .out_num_objects = 1, .out_objects = &userManager), "retaining selected user");
+    }
+    bool selectLocalUser() {
+        AccountUid users[ACC_USER_LIST_SIZE]{};
+        if (!check(serviceDispatch(&account, 2,
+                .buffer_attrs = {SfBufferAttr_Out | SfBufferAttr_HipcPointer},
+                .buffers = {{users, sizeof(users)}}), "reading local users")) return false;
+        if (accountUidIsValid(&users[0]) && !accountUidIsValid(&users[1])) {
+            uid = users[0];
+            return true;
+        }
+
+        // Use the public player-selector ABI with our own cancellable holder.
+        PselUiSettings settings{};
+        if (!check(pselUiCreate(&settings, PselUiMode_UserSelector), "creating user selector")) return false;
+        settings.settings.unk_x97 = 1;
+        PselUiReturnArg selected{};
+        if (!openApplet(static_cast<AppletId>(0x01000010), 0x20000, &settings, sizeof(settings)) ||
+            !waitApplet() || !readAppletOutput(&selected, sizeof(selected))) return false;
+        if (R_FAILED(selected.res) || !accountUidIsValid(&selected.user_id)) { cancelled = true; return false; }
+        uid = selected.user_id;
+        return true;
     }
     bool readAudio(AudioConfig& config) {
         Service audioRoot{}, manager{}, device{};

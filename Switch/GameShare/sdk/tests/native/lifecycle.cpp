@@ -41,6 +41,9 @@ struct Model {
     unsigned failScoped = 0;
     bool cancelResponse = false, waitInApplet = false, audioFallback = false;
     bool multipleUsers = false, cancelSelector = false, waitInSelector = false;
+    bool profileLocked = false, hasLaunchProfile = false, badLaunchProfile = false;
+    unsigned launchPops = 0;
+    AccountUid loaderUser{};
     bool expectInput = true, expectMirrorAudio = true;
     u8 videoMode = 0;
     unsigned audioWrites = 0;
@@ -258,20 +261,27 @@ Result mockServiceDispatch(Service* service, u32 command, const void* in, size_t
             *p.out_handles = newService(target);
             return 0;
         }
-    case Kind::Account:
+    case Kind::Account: {
         if (command == 160) { assert(p.in_send_pid); return 0; }
         if (command == 3 || command == 2) {
             assert(p.buffers[0].size == ACC_USER_LIST_SIZE * sizeof(AccountUid));
+            if (model.profileLocked) {
+                assert(command == 3);
+                return 0;
+            }
             std::memcpy(const_cast<void*>(p.buffers[0].ptr), &User, sizeof(User));
             if (model.multipleUsers)
                 std::memcpy(static_cast<u8*>(const_cast<void*>(p.buffers[0].ptr)) + sizeof(User), &User, sizeof(User));
             return 0;
         }
-        if (command == 150) { output(out, outSize, u8(0)); return 0; }
+        if (command == 150) { output(out, outSize, u8(model.profileLocked)); return 0; }
         assert(command == 101);
-        assert(input<AccountUid>(in, inSize).uid[0] == User.uid[0]);
+        const auto selected = input<AccountUid>(in, inSize);
+        assert(selected.uid[0] == User.uid[0] && selected.uid[1] == User.uid[1]);
+        event("account-manager:open");
         object(Kind::User);
         return 0;
+    }
     case Kind::Root:
         assert(command == 0 && input<u32>(in, inSize) == 3);
         object(Kind::Scoped);
@@ -361,6 +371,7 @@ Result mockServiceDispatch(Service* service, u32 command, const void* in, size_t
         case 504:
             assert(inSize == 32 && outSize == 128);
             assert(static_cast<const u8*>(in)[0] == 1 && static_cast<const u8*>(in)[1] == 1);
+            assert(std::memcmp(static_cast<const u8*>(in) + 16, &User, sizeof(User)) == 0);
             std::memset(out, 0x42, outSize); return 0;
         case 4: assert(input<u32>(in, inSize) == 0); return 0;
         case 500: return 0;
@@ -415,6 +426,19 @@ Result appletCreateLibraryApplet(AppletHolder* holder, AppletId id, unsigned mod
     holder->id = u32(id);
     model.appletCreated = true;
     return 0;
+}
+AccountUid* envGetUserIdStorage() { return &model.loaderUser; }
+Result appletPopLaunchParameter(AppletStorage* storage, AppletLaunchParameterKind kind) {
+    assert(kind == AppletLaunchParameterKind_PreselectedUser && model.profileLocked);
+    assert(++model.launchPops == 1);
+    if (!model.hasLaunchProfile) return Failure;
+    std::array<u8, 0x88> data{};
+    constexpr u32 magic = 0xc79497ca;
+    if (!model.badLaunchProfile) std::memcpy(data.data(), &magic, sizeof(magic));
+    data[4] = 1;
+    std::memcpy(data.data() + 8, &User, sizeof(User));
+    appletCreateStorage(storage, data.size());
+    return appletStorageWrite(storage, 0, data.data(), data.size());
 }
 Result appletCreateStorage(AppletStorage* storage, size_t size) {
     std::lock_guard<std::mutex> lock(model.mutex);
@@ -563,6 +587,11 @@ int main(int argc, char** argv) {
         if (scenario == "cancel_waiting") model.waitInApplet = true;
         if (scenario == "audio_fallback") model.audioFallback = true;
         if (scenario.starts_with("selector_")) model.multipleUsers = true;
+        model.profileLocked = scenario.starts_with("locked_");
+        model.badLaunchProfile = scenario == "locked_bad_launch";
+        model.hasLaunchProfile = scenario == "locked_launch" || model.badLaunchProfile;
+        const bool launchProfileAvailable = scenario == "locked_launch" || scenario == "locked_cached_launch";
+        if (scenario == "locked_cached_launch") model.loaderUser = User;
         if (scenario == "selector_cancel") model.cancelSelector = true;
         if (scenario == "selector_cancel_waiting") model.waitInSelector = true;
         backend.start();
@@ -574,6 +603,13 @@ int main(int argc, char** argv) {
             assert(backend.canUnload());
             balanced();
             assert(count("scoped:2") == 0 && count("guest:map") == 0);
+        } else if (model.profileLocked && !launchProfileAvailable) {
+            waitFor([&] { return backend.state() == Host::State::Failed; }, "locked title without a profile did not fail");
+            backend.stopAndWait();
+            assert(backend.takeError().find("supplied no valid launch profile (0 open)") != std::string::npos);
+            assert(model.launchPops == 1 && count("account-manager:open") == 0);
+            assert(count("selector:start") == 0 && count("scoped:2") == 0 && backend.canUnload());
+            balanced();
         } else if (openFailure || partialRetained) {
             waitFor([&] { return backend.state() == Host::State::Failed; }, "failed target open did not finish");
             assert(!backend.canUnload()); // Worker still belongs to the owner until joined.
@@ -683,6 +719,16 @@ int main(int argc, char** argv) {
                 finish(backend);
             }
             assert(count("audio:off") == (config.mirrorAudio ? 1u : 0u) && count("scoped:5") == 1);
+            if (launchProfileAvailable) {
+                assert(model.loaderUser.uid[0] == User.uid[0] && model.loaderUser.uid[1] == User.uid[1]);
+                assert(count("account-manager:open") == 1 && count("selector:start") == 0);
+                nextSession();
+                Host retry(config);
+                retry.start();
+                waitHosting(retry);
+                finish(retry);
+                assert(model.launchPops == 1 && count("account-manager:open") == 1 && count("selector:start") == 0);
+            }
         }
       }
         if (retained) {

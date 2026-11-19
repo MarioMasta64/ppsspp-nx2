@@ -25,7 +25,10 @@ cache, but packaging rejects mismatched native/experimental modes.
 
 Launch through the same GameShare-capable native title override used for the
 Moonlight SDK example. A generic title override is not known to grant the
-required GameShare context. Choose **GameShare (experimental)** in the host's
+required GameShare context. If another title locks profile switching, the SDK
+uses the Nintendo profile selected for that launch when available. The host
+log distinguishes a missing launch profile from a later StreamPlay or
+matchmaking error. Choose **GameShare (experimental)** in the host's
 main or pause menu, then join from the client's system GameShare screen.
 The client should see its own PPSSPP menu, with a guest-only startup message,
 and browse `sdmc:/switch/ppsspp-switch2/games`. Both browsers can access SD-card
@@ -102,9 +105,12 @@ mapping, and it does not change either core's saved network settings. Stopping
 GameShare closes the listeners. A game already in a lobby may need to leave
 and re-enter multiplayer after GameShare is restarted.
 
-GameShare's effect on the Switch's LAN interface was observed in Moonlight.
-The loopback route and sustained simultaneous games still need console
-qualification.
+The user reported a successful Tekken session in the first loopback build.
+The subsequent build keeps each core's original MAC address and passed the ten
+paired desktop tests. That save-preserving version is tagged
+`switch2-gameshare-multiplayer-baseline` (commit `0699365`). Its NRO, ZIP and
+debug ELF are in `dist-switch2-gameshare/checkpoints/multiplayer-baseline/`.
+The earlier console run used the temporary-MAC build.
 
 ## Diagnostics and validation
 

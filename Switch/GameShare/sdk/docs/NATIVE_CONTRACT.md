@@ -13,7 +13,14 @@ There is no control-property rewrite, HEN/RO update or account edit.
 
 On an owned acc:u0 session,160 takes eight zero bytes plus SendPid to bind the
 application.3 lists open users;150 reads the account switch lock;2 lists local
-users. Select an actual unambiguous user or show normal player selection.
+users. An unambiguous open user takes priority. If user switching is locked
+and the open-user list is ambiguous or empty, use the profile Nintendo supplied
+for this application through the preselected-user launch parameter. Validate
+and cache it in memory for retries in the same process. If the loader
+provides its in-process user-ID cache, preserve the launch selection across
+NRO loads. A locked title without a valid launch profile fails before StreamPlay. Titles that allow switching can still
+use normal player selection.
+
 Switch2 player selection uses applet0x01000010/common version0x20000. Retain
 the owned application manager returned by101 with the real16-byte UID until
 the entire GameShare session ends. The SDK offers no new-user or online flow.

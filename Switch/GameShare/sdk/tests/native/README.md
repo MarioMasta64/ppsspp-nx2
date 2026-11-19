@@ -21,6 +21,8 @@ The cases cover:
 - Guest disconnection and cleanup after a native buffer-registration failure.
 - Matchmaking cancellation, including stop while the applet is still open.
 - Owned player-selector success, cancellation, and cancellation while open.
+- Locked title with a validated launch profile, reuse across sessions,
+  the launcher's profile cache, and missing or malformed launch data.
 - Audio-manager fallback and temporary service cleanup.
 - Disabling application audio mirroring or guest-input mapping independently.
 - Invalid host configurations rejected before opening native resources.
