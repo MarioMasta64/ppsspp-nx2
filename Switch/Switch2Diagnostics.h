@@ -2,5 +2,5 @@
 // Licensed under GPLv2 or later. See LICENSE.TXT.
 #pragma once
 
-void Switch2DiagnosticsInit();
+void Switch2DiagnosticsInit(const char *directory = "sdmc:/switch/ppsspp-switch2/");
 void Switch2DiagnosticsShutdown();

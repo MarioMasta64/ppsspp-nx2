@@ -12,3 +12,6 @@
 
 # To avoid mucking up the utf-8 characters.
 Core/Dialog/PSPOskConstants.cpp binary
+
+# Keep the copied SDK byte-identical, including its upstream EOF spacing.
+Switch/GameShare/sdk/** whitespace=-blank-at-eof

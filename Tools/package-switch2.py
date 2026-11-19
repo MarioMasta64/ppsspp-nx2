@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate a freshly built native NRO, then create an SD-card ZIP and receipt."""
+import argparse
 import hashlib
 import json
 import os
@@ -10,6 +11,14 @@ import subprocess
 import zipfile
 
 root = Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--experimental-gameshare", action="store_true")
+args = parser.parse_args()
+experimental = args.experimental_gameshare
+cache = (root / "build-switch2/CMakeCache.txt").read_text()
+assert ("PPSSPP_SWITCH2_GAMESHARE:BOOL=ON" in cache) == experimental, "Build/package mode mismatch: select --experimental-gameshare for the experimental build"
+app_name = "ppsspp-switch2-gameshare" if experimental else "ppsspp-switch2"
+output_name = "dist-switch2-gameshare" if experimental else "dist-switch2"
 source = root / "build-switch2/PPSSPPSwitch2.nro"
 elf = root / "build-switch2/PPSSPPSwitch2.elf"
 if not elf.exists():
@@ -34,13 +43,15 @@ romfs_data = blob[romfs["offset"]:romfs["offset"] + romfs["bytes"]]
 assert b"gitdir:" not in romfs_data, "Git bookkeeping must not enter ROMFS"
 for filename in (b"images.svg", b"font_atlas.zim", b"ppge_atlas.zim", b"compat.ini", b"ltn0.pgf", b"en_US.ini"):
     assert filename in romfs_data, f"Missing runtime asset: {filename!r}"
-output = root / "dist-switch2"
-app = output / "switch/ppsspp-switch2"
+output = root / output_name
+app = output / "switch" / app_name
 app.mkdir(parents=True, exist_ok=True)
-shutil.copy2(source, app / "ppsspp-switch2.nro")
-shutil.copy2(root / "SWITCH2.md", output / "README-switch2.md")
+shutil.copy2(source, app / (app_name + ".nro"))
+shutil.copy2(root / ("SWITCH2-GAMESHARE.md" if experimental else "SWITCH2.md"), output / "README-switch2.md")
 licenses = output / "licenses"
 licenses.mkdir(exist_ok=True)
+if experimental:
+    shutil.copy2(root / "Switch/GameShare/sdk/LICENSE", licenses / "GameShare-SDK-MIT.txt")
 shutil.copy2(root / "LICENSE.TXT", licenses / "PPSSPP.txt")
 shutil.copy2(root / "ext/aemu_postoffice/gpl-3.0.txt", licenses / "aemu-postoffice-GPL-3.0.txt")
 shutil.copy2(root / "ext/aemu_postoffice/LICENSE", licenses / "aemu-postoffice-NOTICE.txt")
@@ -55,9 +66,12 @@ for relative in ("libounce/licenses", "portlibs/switch2/share/licenses"):
 revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
 upstream = subprocess.check_output(["git", "merge-base", "HEAD", "origin/master"], cwd=root, text=True).strip()
 receipt = {"upstream_revision": upstream, "source_revision": revision, "nro_bytes": len(blob), "sha256": hashlib.sha256(blob).hexdigest(),
-           "assets": sections, "console_tested": False}
+           "assets": sections, "console_tested": False, "experimental_gameshare": experimental,
+           "source_dirty": bool(subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=all"], cwd=root, text=True))}
+if experimental:
+    receipt["guest_isolation"] = json.loads((root / "build-switch2/gameshare/guest-core.isolation.json").read_text())
 (output / "build-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
-archive = output / "ppsspp-switch2.zip"
+archive = output / (app_name + ".zip")
 with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as package:
     for directory in (output / "switch", licenses):
         for path in sorted(directory.rglob("*")):
@@ -67,6 +81,6 @@ with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as package:
         package.write(output / name, name)
 with zipfile.ZipFile(archive) as package:
     assert package.testzip() is None
-    assert hashlib.sha256(package.read("switch/ppsspp-switch2/ppsspp-switch2.nro")).hexdigest() == receipt["sha256"]
+    assert hashlib.sha256(package.read("switch/" + app_name + "/" + app_name + ".nro")).hexdigest() == receipt["sha256"]
 print(json.dumps(receipt, indent=2))
 print(f"Verified package: {archive}")

@@ -1,3 +1,6 @@
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+#include "Switch/GameShare/Integration.h"
+#endif
 // Copyright (c) 2014- PPSSPP Project.
 
 // This program is free software: you can redistribute it and/or modify
@@ -770,6 +773,14 @@ void GamePauseScreen::CreateViews() {
 	}
 
 	ChoiceGroup *mainGroup = rightColumnItems->Add(new ChoiceGroup());
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+		if (Switch2GameShareAvailable()) {
+			mainGroup->Add(new Choice("GameShare (experimental)"))->OnClick.Add([](UI::EventParams &) {
+				Switch2GameShareToggle();
+			});
+		}
+#endif
+
 	if (g_paramSFO.IsValid() && g_Config.HasGameConfig(g_paramSFO.GetDiscID())) {
 		mainGroup->Add(new Choice(pa->T("Game Settings"), ImageID("I_GEAR")))->OnClick.Handle(this, &GamePauseScreen::OnGameSettings);
 		auto pa = GetI18NCategory(I18NCat::PAUSE);

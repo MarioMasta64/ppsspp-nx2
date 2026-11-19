@@ -30,9 +30,18 @@
 #include "Core/ConfigValues.h"
 #include "Core/EmuThread.h"
 #include "Switch/Switch2Diagnostics.h"
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+#include "Switch/GameShare/Integration.h"
+#endif
 
 namespace {
+#if defined(PPSSPP_SWITCH2_GUEST_BUILD)
+constexpr const char *DATA_PATH = "sdmc:/switch/ppsspp-switch2-gameshare/guest/";
+#elif defined(PPSSPP_SWITCH2_GAMESHARE)
+constexpr const char *DATA_PATH = "sdmc:/switch/ppsspp-switch2-gameshare/";
+#else
 constexpr const char *DATA_PATH = "sdmc:/switch/ppsspp-switch2/";
+#endif
 std::atomic<bool> quitRequested{false};
 uint32_t displayWidth = 1920;
 uint32_t displayHeight = 1080;
@@ -155,6 +164,11 @@ float System_GetPropertyFloat(SystemProperty prop) {
 	}
 }
 bool System_GetPropertyBool(SystemProperty prop) {
+#if defined(PPSSPP_SWITCH2_GUEST_BUILD)
+	if (prop == SYSPROP_HAS_TEXT_INPUT_DIALOG || prop == SYSPROP_KEYBOARD_IS_SOFT) {
+		return false;
+	}
+#endif
 	switch (prop) {
 	case SYSPROP_CAN_JIT:
 	case SYSPROP_HAS_BACK_BUTTON:
@@ -178,6 +192,9 @@ bool System_MakeRequest(SystemRequestType type, int requestId, const std::string
 		quitRequested = true;
 		return true;
 	case SystemRequestType::INPUT_TEXT_MODAL:
+#if defined(PPSSPP_SWITCH2_GUEST_BUILD)
+		g_requestManager.PostSystemFailure(requestId);
+#else
 		System_RunOnMainThread([=] {
 			SwkbdConfig keyboard{};
 			Result rc = swkbdCreate(&keyboard, 0);
@@ -198,6 +215,7 @@ bool System_MakeRequest(SystemRequestType type, int requestId, const std::string
 			else
 				g_requestManager.PostSystemFailure(requestId);
 		});
+#endif
 		return true;
 	case SystemRequestType::SET_WINDOW_TITLE:
 	case SystemRequestType::SET_KEEP_SCREEN_BRIGHT:
@@ -208,6 +226,7 @@ bool System_MakeRequest(SystemRequestType type, int requestId, const std::string
 	}
 }
 
+#if !defined(PPSSPP_SWITCH2_GUEST_BUILD)
 int main(int argc, char *argv[]) {
 	mkdir("sdmc:/switch", 0777);
 	mkdir(DATA_PATH, 0777);
@@ -215,7 +234,7 @@ int main(int argc, char *argv[]) {
 	std::freopen("boot.log", "w", stderr);
 	setvbuf(stderr, nullptr, _IONBF, 0);
 	std::fprintf(stderr, "PPSSPP Switch 2 startup\n");
-	Switch2DiagnosticsInit();
+	Switch2DiagnosticsInit(DATA_PATH);
 	Result rc = romfsInit();
 	if (R_FAILED(rc))
 		return ShowStartupError("Could not mount embedded assets");
@@ -248,8 +267,13 @@ int main(int argc, char *argv[]) {
 	g_Config.bShowTouchControls = false;
 	g_Config.bFastMemory = false;
 	g_Config.iGPUBackend = static_cast<int>(GPUBackend::VULKAN);
-	if (g_Config.currentDirectory == Path("/"))
+	if (g_Config.currentDirectory == Path("/")) {
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+		g_Config.currentDirectory = Path("sdmc:/switch/ppsspp-switch2/games");
+#else
 		g_Config.currentDirectory = Path("sdmc:/");
+#endif
+	}
 	// Request 120 Hz where supported, retaining 60 Hz display compatibility.
 	rc = nwindowSetModeDimensions(nwindowGetDefault(), 1920, 1080, 1920, 1080);
 	if (R_SUCCEEDED(rc)) {
@@ -293,8 +317,19 @@ int main(int argc, char *argv[]) {
 	padConfigureInput(1, HidNpadStyleSet_NpadStandard);
 	padInitializeDefault(&pad);
 	RunMainLoop(&graphics, new NativeApplication(), [&](GraphicsContext *context) {
-		if (quitRequested || !appletMainLoop())
+		if (!appletMainLoop()) {
+			quitRequested = true;
+		}
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+		Switch2GameSharePoll();
+		if (quitRequested && Switch2GameSharePrepareExit()) {
 			return false;
+		}
+#else
+		if (quitRequested) {
+			return false;
+		}
+#endif
 		// The SDK follows VI2 refresh events; keep the menu limiter in sync.
 		u16 numerator = 0, denominator = 0;
 		if (R_SUCCEEDED(nwindowGetPresentInterval(nwindowGetDefault(), &numerator, &denominator)) && numerator && denominator) {
@@ -305,7 +340,11 @@ int main(int argc, char *argv[]) {
 		}
 		PollInput(pad);
 		NativeFrame(context);
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+		return true;
+#else
 		return !quitRequested;
+#endif
 	});
 	std::fprintf(stderr, "Main loop ended: quitRequested=%d\n", quitRequested.load() ? 1 : 0);
 	graphics.ShutdownSurface();
@@ -317,3 +356,5 @@ int main(int argc, char *argv[]) {
 	romfsExit();
 	return 0;
 }
+
+#endif // !PPSSPP_SWITCH2_GUEST_BUILD

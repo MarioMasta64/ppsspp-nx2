@@ -1,3 +1,6 @@
+#if defined(__SWITCH2__)
+#include "Switch/GameShare/FrameSink.h"
+#endif
 // Copyright (c) 2012- PPSSPP Project.
 
 // This program is free software: you can redistribute it and/or modify
@@ -1516,6 +1519,9 @@ void NativeFrame(GraphicsContext *graphicsContext) {
 		}
 		// Last, since the readback ends the backbuffer pass. Nothing can draw after it.
 		ScreenshotNotifyEndOfFrame(g_draw);
+#if defined(__SWITCH2__)
+		Switch2CaptureFrame(g_draw);
+#endif
 		if (g_screenManager->getUIContext()->Text()) {
 			g_screenManager->getUIContext()->Text()->OncePerFrame();
 		}

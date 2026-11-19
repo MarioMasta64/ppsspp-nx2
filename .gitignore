@@ -157,3 +157,5 @@ cmake-build-*/
 /build-switch2/
 /build-host/
 /dist-switch2/
+
+/dist-switch2-gameshare/

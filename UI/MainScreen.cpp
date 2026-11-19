@@ -1,3 +1,6 @@
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+#include "Switch/GameShare/Integration.h"
+#endif
 // Copyright (c) 2013- PPSSPP Project.
 
 // This program is free software: you can redistribute it and/or modify
@@ -397,6 +400,14 @@ void MainScreen::CreateMainButtons(UI::LinearLayout *parent, bool portrait) {
 			mainButtons->Add(new Choice(mm->T("Load", "Load...")))->OnClick.Handle(this, &MainScreen::OnLoadFile);
 		}
 		mainButtons->Add(new Choice(mm->T("Game Settings", "Settings")))->OnClick.Handle(this, &MainScreen::OnGameSettings);
+
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+		if (Switch2GameShareAvailable()) {
+			mainButtons->Add(new Choice("GameShare (experimental)"))->OnClick.Add([](UI::EventParams &) {
+				Switch2GameShareToggle();
+			});
+		}
+#endif
 		mainButtons->Add(new Choice(mm->T("About PPSSPP")))->OnClick.Handle(this, &MainScreen::OnCredits);
 		mainButtons->Add(new Choice(mm->T("www.ppsspp.org")))->OnClick.Handle(this, &MainScreen::OnPPSSPPOrg);
 

@@ -378,6 +378,7 @@ add_library(Common STATIC
 	MemoryUtil.cpp
 	MemoryUtilHorizon.cpp
 	../Switch/Switch2Jit.cpp
+	../Switch/GameShare/FrameSink.cpp
 	../Switch/Switch2VulkanLoader.cpp
 	MemoryUtil.h
 	MsgHandler.h

@@ -4,6 +4,7 @@
 #include "Switch/Switch2Diagnostics.h"
 #include <cstdio>
 #include <cstddef>
+#include <cstring>
 
 namespace {
 FsFile faultFile{};
@@ -99,14 +100,45 @@ void __libnx_exception_handler(ThreadExceptionDump *context) {
 }
 }
 
-void Switch2DiagnosticsInit() {
+namespace {
+Result PreserveReport(FsFileSystem *sd, const char *path, u64 expectedMagic) {
+	FsFile previous;
+	Result rc = fsFsOpenFile(sd, path, FsOpenMode_Read, &previous);
+	if (R_FAILED(rc)) { return 0; }
+	u64 magic = 0;
+	uint64_t read = 0;
+	rc = fsFileRead(&previous, 0, &magic, sizeof(magic), FsReadOption_None, &read);
+	fsFileClose(&previous);
+	if (R_FAILED(rc) || read != sizeof(magic) || magic != expectedMagic) { return 0; }
+	char archived[512];
+	if (std::snprintf(archived, sizeof(archived), "%s.previous", path) >= sizeof(archived)) {
+		return MAKERESULT(Module_Libnx, LibnxError_BadInput);
+	}
+	FsDirEntryType type;
+	if (R_SUCCEEDED(fsFsGetEntryType(sd, archived, &type))) {
+		rc = fsFsDeleteFile(sd, archived);
+		if (R_FAILED(rc)) { return rc; }
+	}
+	return fsFsRenameFile(sd, path, archived);
+}
+}
+
+void Switch2DiagnosticsInit(const char *directory) {
 	FsFileSystem *sd = fsdevGetDeviceFileSystem("sdmc");
 	if (!sd) {
 		return;
 	}
-	constexpr const char *path = "/switch/ppsspp-switch2/native-fault.bin";
-	fsFsCreateFile(sd, path, sizeof(FaultRecord), 0);
-	Result rc = fsFsOpenFile(sd, path, FsOpenMode_Write, &faultFile);
+	const char *relative = std::strncmp(directory, "sdmc:/", 6) == 0 ? directory + 5 : directory;
+	char path[512], exitPath[512];
+	if (std::snprintf(path, sizeof(path), "%snative-fault.bin", relative) >= sizeof(path) ||
+		std::snprintf(exitPath, sizeof(exitPath), "%snative-exit.bin", relative) >= sizeof(exitPath)) {
+		return;
+	}
+	Result rc = PreserveReport(sd, path, 0x31544C5541465050ULL);
+	if (R_SUCCEEDED(rc)) {
+		fsFsCreateFile(sd, path, sizeof(FaultRecord), 0);
+		rc = fsFsOpenFile(sd, path, FsOpenMode_Write, &faultFile);
+	}
 	if (R_SUCCEEDED(rc)) {
 		rc = fsFileSetSize(&faultFile, sizeof(FaultRecord));
 		const FaultRecord empty{};
@@ -120,9 +152,11 @@ void Switch2DiagnosticsInit() {
 		}
 	}
 	std::fprintf(stderr, "Native fault recorder: %08x\n", rc);
-	constexpr const char *exitPath = "/switch/ppsspp-switch2/native-exit.bin";
-	fsFsCreateFile(sd, exitPath, sizeof(ExitRecord), 0);
-	rc = fsFsOpenFile(sd, exitPath, FsOpenMode_Write, &exitFile);
+	rc = PreserveReport(sd, exitPath, 0x3154495845505050ULL);
+	if (R_SUCCEEDED(rc)) {
+		fsFsCreateFile(sd, exitPath, sizeof(ExitRecord), 0);
+		rc = fsFsOpenFile(sd, exitPath, FsOpenMode_Write, &exitFile);
+	}
 	if (R_SUCCEEDED(rc)) {
 		rc = fsFileSetSize(&exitFile, sizeof(ExitRecord));
 		const ExitRecord empty{};
