@@ -28,7 +28,7 @@ for index, name in enumerate(("icon", "nacp", "romfs")):
     sections[name] = {"offset": image_size + offset, "bytes": size}
 assert sections["nacp"]["bytes"] == 16384, "Invalid NACP size"
 icon = sections["icon"]
-assert blob[icon["offset"]:icon["offset"] + 2] == b"\xff\xd8", "Expected JPEG menu icon"
+assert blob[icon["offset"]:icon["offset"] + icon["bytes"]] == (root / "Switch/ppsspp-switch2.jpg").read_bytes(), "Expected PPSSPP menu icon"
 romfs = sections["romfs"]
 romfs_data = blob[romfs["offset"]:romfs["offset"] + romfs["bytes"]]
 assert b"gitdir:" not in romfs_data, "Git bookkeeping must not enter ROMFS"

@@ -29,6 +29,7 @@
 #include "Core/Config.h"
 #include "Core/ConfigValues.h"
 #include "Core/EmuThread.h"
+#include "Switch/Switch2Diagnostics.h"
 
 namespace {
 constexpr const char *DATA_PATH = "sdmc:/switch/ppsspp-switch2/";
@@ -214,6 +215,7 @@ int main(int argc, char *argv[]) {
 	std::freopen("boot.log", "w", stderr);
 	setvbuf(stderr, nullptr, _IONBF, 0);
 	std::fprintf(stderr, "PPSSPP Switch 2 startup\n");
+	Switch2DiagnosticsInit();
 	Result rc = romfsInit();
 	if (R_FAILED(rc))
 		return ShowStartupError("Could not mount embedded assets");
@@ -305,9 +307,11 @@ int main(int argc, char *argv[]) {
 		NativeFrame(context);
 		return !quitRequested;
 	});
+	std::fprintf(stderr, "Main loop ended: quitRequested=%d\n", quitRequested.load() ? 1 : 0);
 	graphics.ShutdownSurface();
 	graphics.ShutdownAPI();
 	NativeShutdown();
+	Switch2DiagnosticsShutdown();
 	if (socketsReady)
 		socketExit();
 	romfsExit();

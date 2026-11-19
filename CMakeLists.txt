@@ -898,7 +898,7 @@ endif()
 
 if(NINTENDO_SWITCH2)
 	set(TargetBin PPSSPPSwitch2)
-	list(APPEND targetExtra Switch/Switch2Main.cpp Switch/Switch2Audio.cpp)
+	list(APPEND targetExtra Switch/Switch2Main.cpp Switch/Switch2Audio.cpp Switch/Switch2Diagnostics.cpp)
 	list(APPEND targetExtraLibs kaihen nx)
 elseif(ANDROID)
 	list(APPEND AndroidJniSource
@@ -1575,7 +1575,7 @@ if(NINTENDO_SWITCH2)
 	set_target_properties(PPSSPPSwitch2Assets PROPERTIES
 		DKP_ASSET_FOLDER "${CMAKE_BINARY_DIR}/romfs-switch2"
 		DKP_ASSET_FILES "${SWITCH2_RUNTIME_ASSETS};${SWITCH2_ASSET_STAMP}")
-	nx_create_nro(${TargetBin} NACP "${CMAKE_BINARY_DIR}/ppsspp-switch2.nacp" ROMFS PPSSPPSwitch2Assets)
+	nx_create_nro(${TargetBin} ICON "${CMAKE_SOURCE_DIR}/Switch/ppsspp-switch2.jpg" NACP "${CMAKE_BINARY_DIR}/ppsspp-switch2.nacp" ROMFS PPSSPPSwitch2Assets)
 endif()
 
 # installs

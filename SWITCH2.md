@@ -152,3 +152,26 @@ state, so a second thread alone is not an independent emulator instance.
 The output policy above supersedes the initial 720p/60 configuration. Console
 confirmation of the first build covers its menu and controls only; this new
 resolution/refresh policy requires another device test.
+
+## Game-start diagnostics (2026-11-19)
+
+The user confirmed that the 1080p build's menu works. Its native presentation
+interval reported a 120 fps target; this is not a measured game frame rate.
+Tekken: Dark Resurrection (ULUS10139) hit the guest crash screen in `strlen`
+at PC `08a6db2c`, reading address `00000022` with the ARM64 JIT. A temporary
+CPU-interpreter test progressed through MPEG module loading, then returned
+to hbmenu. Neither backend has qualified gameplay yet.
+
+The diagnostic build embeds the standard PPSSPP logo as a 256x256 JPEG NRO
+icon. Packaging checks that the embedded icon matches that asset exactly.
+The logo comes from `icons/hicolor/256x256/apps/ppsspp.png`.
+
+A native fault recorder preopens `native-fault.bin` before graphics startup.
+The SDK exception hook writes a fixed-size record through the native FS API,
+without allocating or using stdio on the faulting thread. Its header contains
+magic `0x31544c5541465050`, the runtime handler address, the system tick and
+the SDK context size, followed at offset 32 by `ThreadExceptionDump`. The
+runtime handler address anchors symbolization against the matching ELF.
+The file is cleared on each launch; a zero header means no fault was recorded.
+This is best-effort diagnosis, not exception recovery. Normal main-loop exit
+is logged separately in `boot.log`. Retrieve diagnostic files before relaunch.
