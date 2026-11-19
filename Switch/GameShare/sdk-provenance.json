@@ -82,13 +82,5 @@
       "tests/native/lifecycle.cpp": "aa17680a1b8e4234e189041f50809a8f57694e682a86f2de2470e575d1976ae2",
       "tests/native/run.py": "8a277369276f1c4276006faedea9b17b44c22c432ebbaa3999d30a95bd00b8d7"
     }
-  },
-  "local_guest_audio_pacing_changes": {
-    "reason": "Refill multiple PCM chunks after a delayed poll and log empty queue observations.",
-    "files": {
-      "src/host.cpp": "c09e1738707c843f71944cae89449237606ede8a727016d2eb5aa0dc409ed877",
-      "tests/native/lifecycle.cpp": "023ecda689c20405a23fd56641bd83d49f25d742d1e886774d703b096f8e9f77",
-      "docs/GUEST_AUDIO.md": "1a034724e240541c93d30fd68fbdc435e5f5f9ee7ce2af35fed85aff345ad0fe"
-    }
   }
 }

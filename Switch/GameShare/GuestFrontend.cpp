@@ -8,11 +8,8 @@
 #include "Common/Thread/ThreadUtil.h"
 #include "Core/Core.h"
 #include "Core/HLE/GameShareAdhoc.h"
-#include "Core/HW/Display.h"
-#include "Core/System.h"
 #include "Core/MemMap.h"
 #include "Common/System/OSD.h"
-#include <chrono>
 #include <exception>
 #include <thread>
 
@@ -154,7 +151,6 @@ void GuestMain() {
 			guestState = 2;
 			GuestLog("Isolated guest UI ready (1280x720, ARM64 JIT)");
 			g_OSD.Show(OSDType::MESSAGE_INFO, "GameShare guest: choose a game", 8.0f);
-			auto lastSpeedSample = std::chrono::steady_clock::now();
 			while (!quitRequested) {
 				GuestPollInput();
 				if (!guestActive) {
@@ -162,17 +158,6 @@ void GuestMain() {
 					continue;
 				}
 				NativeFrame(&graphics);
-				const auto now = std::chrono::steady_clock::now();
-				if (now - lastSpeedSample >= std::chrono::seconds(5)) {
-					lastSpeedSample = now;
-					if (PSP_IsInited() && GetUIState() == UISTATE_INGAME) {
-						float vps = 0.0f;
-						__DisplayGetVPS(&vps);
-						char message[80];
-						std::snprintf(message, sizeof(message), "emulation speed %.1f vblanks/s", vps);
-						GuestLog(message);
-					}
-				}
 			}
 			guestState = 4;
 		}

@@ -46,7 +46,7 @@ struct Model {
     AccountUid loaderUser{};
     bool expectInput = true, expectMirrorAudio = true;
     u8 videoMode = 0;
-    unsigned audioWrites = 0, audioQueries = 0, audioQueued = 0;
+    unsigned audioWrites = 0;
     std::atomic<unsigned> audioPulls{0};
     std::atomic<bool> appletExited {false}, mapping {false}, inputReady {true};
     std::atomic<unsigned> connectionMask {1}, inputSamples {0}, connectionCalls {0};
@@ -346,27 +346,15 @@ Result mockServiceDispatch(Service* service, u32 command, const void* in, size_t
             output(out, outSize, u32(2048)); return 0;
         case 42:
             assert(input<u8>(in, inSize) == 0);
-            if (++model.audioQueries == 3) {
-                // Drain more than one chunk in a single late poll.
-                assert(model.audioQueued == 1536);
-                model.audioQueued -= 1024;
-            }
-            output(out, outSize, u32(2048 - model.audioQueued)); return 0;
+            output(out, outSize, u32(model.audioWrites < 2 ? 2048 : 1024)); return 0;
         case 40: {
             const auto words = input<std::array<u32, 2>>(in, inSize);
-            const unsigned write = model.audioWrites++;
-            assert(write < 6);
-            assert(model.audioQueries == (write == 0 ? 1u : write < 4 ? 2u : 3u));
-            assert(words[0] == 0 && words[1] == (write == 1 ? 384 : 512));
+            assert(words[0] == 0 && words[1] == (model.audioWrites ? 384 : 512));
             assert(!p.in_send_pid && p.buffer_attrs[0] == (SfBufferAttr_In | SfBufferAttr_HipcAutoSelect));
             assert(p.buffers[0].size == words[1] * 4);
             const auto* pcm = static_cast<const std::int16_t*>(p.buffers[0].ptr);
-            assert(pcm[0] == (write == 1 ? 256 : 0));
-            const u32 accepted = write == 0 ? 128 : words[1];
-            model.audioQueued += accepted;
-            assert(model.audioQueued <= 1536);
-            output(out, outSize, accepted);
-            return 0;
+            assert(pcm[0] == (model.audioWrites ? 256 : 0));
+            output(out, outSize, u32(model.audioWrites++ ? 384 : 128)); return 0;
         }
         case 505:
             assert(input<u64>(in, inSize) == Sizes[0] && p.in_num_handles == 1);
@@ -664,12 +652,11 @@ int main(int argc, char** argv) {
             } else waitInput(backend);
             assert(count("scoped:500") == 1 && count("audio:on") == (config.mirrorAudio ? 1u : 0u));
             if (directAudio) {
-                const bool failed = scenario == "separate_audio_failure";
-                const unsigned writes = failed ? 1 : 6;
+                const unsigned writes = scenario == "separate_audio_failure" ? 1 : 2;
                 waitFor([&] { return count("scoped:40") >= writes; }, "direct audio did not write");
                 const auto polls = model.connectionCalls.load();
                 waitFor([&] { return model.connectionCalls >= polls + 3; }, "audio write stopped the session");
-                assert(count("scoped:41") == 1 && count("scoped:40") == writes && model.audioPulls == (failed ? 1u : 5u));
+                assert(count("scoped:41") == 1 && count("scoped:40") == writes && model.audioPulls == 1);
                 assert(backend.state() == Host::State::Hosting);
             }
             if (scenario == "concurrent_hosts") {
