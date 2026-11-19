@@ -186,11 +186,8 @@ the guest received frames and SDK cleanup completed. The launcher NRO was
 restored to the console-confirmed dual-screen build using the saved SD-card
 copy. The renderer trial is recorded in commit `c5a8716`.
 
-The validated audio path currently plays both games on the host. The SDK
-exposes an application-wide mirroring flag and device-volume configuration.
-A separate guest audio route remains unverified. Another audio backend
-replacement should be preceded by evidence of a native guest audio route or a
-controlled mirror-mode comparison.
+At the dual-screen checkpoint, both games played through the host. The SDK
+exposed an application-wide mirroring flag and device-volume configuration.
 
 ## Direct guest audio investigation
 
@@ -198,4 +195,12 @@ The shipped SDK exports a separate PCM writer and per-guest queue counters.
 The reusable Moonlight SDK and its PPSSPP copy now expose a PCM callback.
 Tests of the native worker cover the recovered command layout, the unwritten
 tail after a partial write, and a failed audio command that leaves video and
-input running. A successful local build does not establish client playback.
+input running.
+
+On November 19, 2026, the console test confirmed sound on the GameShare
+client. The working build is tagged `switch2-gameshare-guest-audio-working`
+(commit `50cd977`). The exact installed NRO, SD-card package, matching ELF,
+SDK archive and build records are saved under
+`dist-switch2-gameshare/checkpoints/guest-audio-working/`. For a console
+rollback, reinstall that NRO as
+`/switch/ppsspp-switch2-gameshare/ppsspp-switch2-gameshare.nro`.
