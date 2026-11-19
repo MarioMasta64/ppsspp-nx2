@@ -276,16 +276,10 @@ struct SceNetAdhocctlGroupNode {
 	SceNetEtherAddr bssid;
 };
 
-// User Count
-extern uint32_t _db_user_count;
-
-// User Database
-extern SceNetAdhocctlUserNode * _db_user;
-
-// Game Database
-extern SceNetAdhocctlGameNode * _db_game;
-
-void __AdhocServerInit();
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+int OpenGameShareAdhocControl(uint16_t port);
+void RunGameShareAdhocControl(int listener, const std::atomic<bool> &running);
+#endif
 
 /**
  * Login User into Database (Stream)

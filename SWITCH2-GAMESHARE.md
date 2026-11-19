@@ -83,13 +83,28 @@ disabled because their routing to the remote screen is not implemented.
 PPSSPP sends the guest emulator's PCM to the native per-guest queue and
 keeps the host emulator on normal AudOut. See the
 [recovered audio contract](Switch/GameShare/sdk/docs/GUEST_AUDIO.md).
-The direct path needs a console test for audible playback on the client.
+The console test confirmed audible client playback in the direct-audio build.
 
-PSP ad hoc multiplayer between the copies is not yet configured or qualified.
-Moonlight's research found LAN disruption during GameShare; that does not prove
-whether loopback traffic between these local cores survives. Separate-game
-video/input and safe lifecycle are the first console checks. Measured FPS,
-sustained simultaneous gameplay and guest restart behavior remain unqualified.
+## Local PSP multiplayer
+
+Start GameShare and join from the client. Open the same game on both screens,
+then enter its local wireless or Ad Hoc mode. Create a lobby on either console
+and look for it on the other. If the host had already initialized multiplayer
+before pairing, restart that game once to select the local route.
+
+While GameShare is hosting, PPSSPP runs its built-in discovery service and
+aemu_postoffice packet relay on IPv4 loopback ports 27314 and 27315. Both cores
+use the private route automatically with their existing, independently
+configured PSP MAC addresses.
+The guest still runs on the host Switch 2, so game packets stay on that
+console. The route does not use a public relay, Wi-Fi IP address, or UPnP
+mapping, and it does not change either core's saved network settings. Stopping
+GameShare closes the listeners. A game already in a lobby may need to leave
+and re-enter multiplayer after GameShare is restarted.
+
+GameShare's effect on the Switch's LAN interface was observed in Moonlight.
+The loopback route and sustained simultaneous games still need console
+qualification.
 
 ## Diagnostics and validation
 

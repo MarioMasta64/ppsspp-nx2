@@ -118,7 +118,7 @@ static void *pdp_postoffice_recover(int idx) {
 	struct aemu_postoffice_sock_addr addr;
 	auto server_ip = GetAdhocServerIP();
 	addr.addr = server_ip.in.sin_addr.s_addr;
-	addr.port = htons(AEMU_POSTOFFICE_PORT);
+	addr.port = htons(GetAdhocRelayPort());
 
 	SceNetEtherAddr local_mac;
 	getLocalMac(&local_mac);
@@ -477,7 +477,7 @@ static void *ptp_listen_postoffice_recover(int idx) {
 	struct aemu_postoffice_sock_addr addr;
 	auto server_ip = GetAdhocServerIP();
 	addr.addr = server_ip.in.sin_addr.s_addr;
-	addr.port = htons(AEMU_POSTOFFICE_PORT);
+	addr.port = htons(GetAdhocRelayPort());
 
 	int state;
 	internal->postofficeHandle = ptp_listen_v4(&addr, (const char*)&internal->data.ptp.laddr, internal->data.ptp.lport + portOffset, netAdhocUseUdp, NULL, NULL, &state);
@@ -708,7 +708,7 @@ static int ptp_connect_postoffice(int idx, const char *caller) {
 	struct aemu_postoffice_sock_addr addr;
 	auto server_ip = GetAdhocServerIP();
 	addr.addr = server_ip.in.sin_addr.s_addr;
-	addr.port = htons(AEMU_POSTOFFICE_PORT);
+	addr.port = htons(GetAdhocRelayPort());
 
 	if (internal->postofficeHandle != NULL) {
 		return 0;

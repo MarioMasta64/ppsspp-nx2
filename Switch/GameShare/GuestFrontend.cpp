@@ -7,6 +7,7 @@
 #include "Common/Audio/AudioBackend.h"
 #include "Common/Thread/ThreadUtil.h"
 #include "Core/Core.h"
+#include "Core/HLE/GameShareAdhoc.h"
 #include "Core/MemMap.h"
 #include "Common/System/OSD.h"
 #include <exception>
@@ -202,7 +203,10 @@ extern "C" bool ppsspp_guest_start(const PpssppGuestHost *host) {
 	return true;
 }
 extern "C" void ppsspp_guest_request_stop() { quitRequested = true; }
-extern "C" void ppsspp_guest_set_active(bool active) { guestActive = active; }
+extern "C" void ppsspp_guest_set_active(bool active, bool localAdhoc) {
+	SetGameShareAdhocEnabled(localAdhoc);
+	guestActive = active;
+}
 extern "C" void ppsspp_guest_join() {
 	if (guestThread.joinable()) {
 		guestThread.join();

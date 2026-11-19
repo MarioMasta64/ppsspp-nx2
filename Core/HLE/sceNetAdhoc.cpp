@@ -62,6 +62,7 @@
 #include "Core/HLE/sceKernelInterrupt.h"
 #include "Core/HLE/sceNetAdhoc.h"
 #include "Core/HLE/AdhocTransport.h"
+#include "Core/HLE/GameShareAdhoc.h"
 #include "Core/HLE/sceNet.h"
 #include "Core/HLE/proAdhocServer.h"
 #include "Core/HLE/KernelWaitHelpers.h"
@@ -81,6 +82,60 @@
 // TODO: Make accessor functions instead, and throw all this state in a struct.
 bool netAdhocInited;
 bool netAdhocctlInited;
+
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+static std::atomic<bool> gameShareAdhocEnabled{false};
+static std::atomic<bool> gameShareRoute{false};
+
+void SetGameShareAdhocEnabled(bool enabled) {
+	gameShareAdhocEnabled = enabled;
+}
+
+bool GameShareAdhocNeedsRestart() {
+	return (netAdhocInited || netAdhocctlInited) && !IsGameShareAdhoc();
+}
+
+bool IsGameShareAdhoc() {
+	return gameShareRoute;
+}
+
+static void ChooseGameShareAdhocRoute() {
+	if (!netAdhocInited && !netAdhocctlInited) {
+		const bool local = gameShareAdhocEnabled;
+		const bool wasLocal = gameShareRoute.exchange(local);
+		if (local) {
+			portOffset = 10000;
+			isOriPort = false;
+		} else if (wasLocal) {
+			portOffset = g_Config.iPortOffset;
+			isOriPort = g_Config.bEnableUPnP && g_Config.bUPnPUseOriginalPort;
+		}
+	}
+}
+#else
+bool IsGameShareAdhoc() {
+	return false;
+}
+
+static void ChooseGameShareAdhocRoute() {}
+#endif
+
+bool NetAdhocWlanEnabled() {
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+	const bool requested = gameShareAdhocEnabled;
+	if (netAdhocInited || netAdhocctlInited) {
+		if (IsGameShareAdhoc())
+			return requested;
+	} else if (requested) {
+		return true;
+	}
+#endif
+	return g_Config.bEnableWlan;
+}
+
+uint16_t GetAdhocRelayPort() {
+	return IsGameShareAdhoc() ? GAMESHARE_ADHOC_RELAY_PORT : AEMU_POSTOFFICE_PORT;
+}
 
 bool netAdhocGameModeEntered = false;
 
@@ -625,7 +680,7 @@ static void __AdhocctlNotify(u64 userdata, int cyclesLate) {
 
 	AdhocctlRequest& req = adhocctlRequests[uid];
 
-	if (g_Config.bEnableWlan) {
+	if (NetAdhocWlanEnabled()) {
 		const std::lock_guard<std::mutex> adhocctl_guard(adhocctlMutex);
 		enum adhocctl_call_status call_status = ADHOCCTL_CALL_WOULDBLOCK;
 		if (adhocctlHandle) {
@@ -1484,7 +1539,8 @@ int WaitBlockingAdhocSocket(u64 threadSocketId, int type, int pspSocketId, void*
 }
 
 static void SetupAdhocRelayMode() {
-	switch ((AdhocServerRelayMode)g_Config.iAdhocServerRelayMode) {
+	const auto relayMode = IsGameShareAdhoc() ? AdhocServerRelayMode::AlwaysOn : (AdhocServerRelayMode)g_Config.iAdhocServerRelayMode;
+	switch (relayMode) {
 	case AdhocServerRelayMode::Auto:
 		serverHasRelay = false;
 		// Fetch data mode from server list
@@ -1511,12 +1567,12 @@ static void SetupAdhocRelayMode() {
 	} else {
 		transport = std::make_unique<P2PTransport>();
 	}
-	if (NetSimTransport::Enabled()) {
+	if (!IsGameShareAdhoc() && NetSimTransport::Enabled()) {
 		// The random numbers are the same for a run each time, but not on every instance.
 		transport = std::make_unique<NetSimTransport>(std::move(transport), PPSSPP_ID);
 	}
 
-	netAdhocUseUdp = g_Config.bAdhocUseUdp;
+	netAdhocUseUdp = !IsGameShareAdhoc() && g_Config.bAdhocUseUdp;
 	netAdhocRelayModeEnetPdpReliable = g_Config.bAdhocRelayModeEnetPdpReliable;
 
 	init_aemu_postoffice(netAdhocUseUdp);
@@ -1580,6 +1636,9 @@ void __NetAdhocDoState(PointerWrap &p) {
 
 	auto cur_netAdhocInited = netAdhocInited;
 	auto cur_netAdhocctlInited = netAdhocctlInited;
+	if (p.mode == p.MODE_READ) {
+		ChooseGameShareAdhocRoute();
+	}
 
 	Do(p, netAdhocInited);
 	Do(p, netAdhocctlInited);
@@ -1790,7 +1849,9 @@ void __NetAdhocInit() {
 	netAdhocctlInited = false;
 	adhocctlHandlers.clear();
 	__AdhocNotifInit();
-	__AdhocServerInit();
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+	gameShareRoute = false;
+#endif
 
 	// Create built-in AdhocServer Thread. The flag is set here rather than by the thread, so that a
 	// shutdown that clears it before the thread gets going can't be undone.
@@ -1801,7 +1862,11 @@ void __NetAdhocInit() {
 	if (relayThread.joinable()) {
 		relayThread.join();
 	}
-	if (g_Config.bEnableWlan && g_Config.bEnableAdhocServer) {
+	if (g_Config.bEnableWlan && g_Config.bEnableAdhocServer
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+		&& !gameShareAdhocEnabled
+#endif
+	) {
 		adhocServerRunning = true;
 		adhocServerThread = std::thread(proAdhocServerThread, SERVER_PORT);
 
@@ -1857,6 +1922,7 @@ void __NetAdhocInit() {
 u32 sceNetAdhocInit(MIPSState *mips) {
 	if (!netAdhocInited) {
 		// Library initialized
+		ChooseGameShareAdhocRoute();
 		netAdhocInited = true;
 		isAdhocctlBusy = false;
 
@@ -1868,11 +1934,11 @@ u32 sceNetAdhocInit(MIPSState *mips) {
 		SetupAdhocRelayMode();
 
 		auto n = GetI18NCategory(I18NCat::NETWORKING);
-		if (g_Config.bAdhocUseUdp && g_Config.bEnableAdhocServer && isLocalServer) {
+		if (netAdhocUseUdp && g_Config.bEnableAdhocServer && isLocalServer) {
 			g_OSD.Show(OSDType::MESSAGE_WARNING, n->T("Built-in adhoc server does not currently support UDP"), 20.0f, "udp built-in server warning");
 		}
 
-		if (g_Config.bEnableWlan) {
+		if (NetAdhocWlanEnabled()) {
 			std::string_view modeStr = serverHasRelay ? n->T("Relay server mode") : n->T("P2P mode");
 			g_OSD.Show(OSDType::MESSAGE_INFO, ApplySafeSubstitutions("%1: %2", n->T("Ad Hoc multiplayer"), modeStr), 0.0f, "adhoc started");
 		}
@@ -1910,7 +1976,8 @@ int sceNetAdhocctlInit(MIPSState *mips, int stackSize, int prio, u32 productAddr
 		return hleLogError(Log::sceNet, SCE_NET_ADHOCCTL_ERROR_INVALID_ARG, "bad adhoc id");
 	}
 
-	if (g_Config.bEnableWlan) {
+	ChooseGameShareAdhocRoute();
+	if (g_Config.bEnableWlan && !IsGameShareAdhoc()) {
 		// Needed for peers and ad hoc servers on the same LAN (Android 17+).
 		System_RequestLocalNetworkPermission();
 	}
@@ -2010,7 +2077,7 @@ uint16_t get_unused_pdp_port() {
 }
 
 int NetAdhocPdpCreate(const char *mac, int port, int bufferSize, u32 flag, bool postoffice_enet_pdp_reliable) {
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return -1;
 	}
 
@@ -2125,7 +2192,7 @@ static int sceNetAdhocctlGetParameter(u32 paramAddr) {
 	memcpy(grpName, parameter.group_name.data, ADHOCCTL_GROUPNAME_LEN);
 	parameter.nickname.data[ADHOCCTL_NICKNAME_LEN - 1] = 0;
 	DEBUG_LOG(Log::sceNet, "sceNetAdhocctlGetParameter(%08x) [Ch=%i][Group=%s][BSSID=%s][name=%s]", paramAddr, parameter.channel, grpName, mac2str(&parameter.bssid.mac_addr).c_str(), parameter.nickname.data);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, SCE_NET_ADHOCCTL_ERROR_DISCONNECTED);
 	}
 
@@ -2165,7 +2232,7 @@ int sceNetAdhocPdpSend(MIPSState *mips, int id, const char *mac, u32 port, void 
 	} else {
 		VERBOSE_LOG(Log::sceNet, "sceNetAdhocPdpSend(%i, %s, %i, %p, %i, %i, %i) at %08x", id, mac2str((SceNetEtherAddr*)mac).c_str(), port, data, len, timeout, flag, mips->pc);
 	}
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, -1);
 	}
 	SceNetEtherAddr * daddr = (SceNetEtherAddr *)mac;
@@ -2417,7 +2484,7 @@ int sceNetAdhocPdpRecv(MIPSState *mips, int id, void *addr, void * port, void *b
 		VERBOSE_LOG(Log::sceNet, "sceNetAdhocPdpRecv(%i, %p, %p, %p, %p, %i, %i) at %08x", id, addr, port, buf, dataLength, timeout, flag, mips->pc);
 	}
 
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, -1);
 	}
 
@@ -2752,7 +2819,7 @@ static int sceNetAdhocPdpDelete(MIPSState *mips, int id, int unknown) {
 		return hleLogError(Log::sceNet, SCE_NET_ADHOC_ERROR_INVALID_ARG, "invalid flag");
 	}
 	/*
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return 0;
 	}
 	*/
@@ -2779,7 +2846,7 @@ static int sceNetAdhocctlGetAdhocId(MIPSState *mips, u32 productStructAddr) {
 // FIXME: Scan probably not a blocking function since there is ADHOCCTL_STATE_SCANNING state that can be polled by the game, right? But apparently it need to be delayed for Naruto Shippuden Ultimate Ninja Heroes 3
 int sceNetAdhocctlScan(MIPSState *mips) {
 	INFO_LOG(Log::sceNet, "sceNetAdhocctlScan() at %08x", mips->pc);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, -1, "WLAN off");
 	}
 
@@ -2846,7 +2913,7 @@ int sceNetAdhocctlGetScanInfo(MIPSState *mips, u32 sizeAddr, u32 bufAddr) {
 	}
 
 	INFO_LOG(Log::sceNet, "sceNetAdhocctlGetScanInfo([%08x]=%i, %08x) at %08x", sizeAddr, buflen ? (int)*buflen : 0, bufAddr, mips->pc);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogWarning(Log::sceNet, 0, "WLAN off");
 	}
 
@@ -3215,7 +3282,7 @@ static int sceNetAdhocctlGetNameByAddr(MIPSState *mips, const char *mac, u32 nam
 
 int sceNetAdhocctlGetPeerInfo(MIPSState *mips, const char *mac, int size, u32 peerInfoAddr) {
 	VERBOSE_LOG(Log::sceNet, "sceNetAdhocctlGetPeerInfo(%s, %i, %08x) at %08x", mac2str((SceNetEtherAddr*)mac).c_str(), size, peerInfoAddr, mips->pc);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, -1);
 	}
 
@@ -3345,7 +3412,7 @@ int sceNetAdhocctlCreate(MIPSState *mips, const char *groupName) {
 	if (groupName)
 		strncpy(grpName, groupName, ADHOCCTL_GROUPNAME_LEN); // For logging purpose, must not be truncated
 	INFO_LOG(Log::sceNet, "sceNetAdhocctlCreate(%s) at %08x", grpName, mips->pc);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		ERROR_LOG(Log::sceNet, "sceNetAdhocctlCreate(%s) failed: WLAN off", grpName);
 		return -1;  // Not sure about the correct error code here.
 	}
@@ -3360,7 +3427,7 @@ int sceNetAdhocctlConnect(MIPSState *mips, const char* groupName) {
 	if (groupName)
 		strncpy(grpName, groupName, ADHOCCTL_GROUPNAME_LEN); // For logging purpose, must not be truncated
 	INFO_LOG(Log::sceNet, "sceNetAdhocctlConnect(%s) at %08x", grpName, mips->pc);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		ERROR_LOG(Log::sceNet, "sceNetAdhocctlConnect(%s) failed: WLAN off", grpName);
 		return -1;  // Not sure about the correct error code here.
 	}
@@ -3372,7 +3439,7 @@ int sceNetAdhocctlConnect(MIPSState *mips, const char* groupName) {
 
 int sceNetAdhocctlJoin(MIPSState *mips, u32 scanInfoAddr) {
 	INFO_LOG(Log::sceNet, "sceNetAdhocctlJoin(%08x) at %08x", scanInfoAddr, mips->pc);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return -1;
 	}
 
@@ -3891,7 +3958,7 @@ uint16_t get_random_unused_ptp_port() {
 
 static int sceNetAdhocPtpOpen(MIPSState *mips, const char *srcmac, int sport, const char *dstmac, int dport, int bufsize, int rexmt_int, int rexmt_cnt, int flag) {
 	INFO_LOG(Log::sceNet, "sceNetAdhocPtpOpen(%s, %d, %s, %d, %d, %d, %d, %d) at %08x", mac2str((SceNetEtherAddr*)srcmac).c_str(), sport, mac2str((SceNetEtherAddr*)dstmac).c_str(),dport,bufsize, rexmt_int, rexmt_cnt, flag, mips->pc);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, -1, "WLAN off");
 	}
 	SceNetEtherAddr* saddr = (SceNetEtherAddr*)srcmac;
@@ -4085,7 +4152,7 @@ static int sceNetAdhocPtpAccept(MIPSState *mips, int id, u32 peerMacAddrPtr, u32
 	} else {
 		VERBOSE_LOG(Log::sceNet, "sceNetAdhocPtpAccept(%d, [%08x]=%s, [%08x]=%u, %d, %u) at %08x", id, peerMacAddrPtr, mac2str(addr).c_str(), peerPortPtr, port ? *port : -1, timeout, flag, mips->pc);
 	}
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, -1, "WLAN off");
 	}
 
@@ -4288,7 +4355,7 @@ int NetAdhocPtp_Connect(int id, int timeout, int flag, bool allowForcedConnect) 
  */
 static int sceNetAdhocPtpConnect(MIPSState *mips, int id, int timeout, int flag) {
 	INFO_LOG(Log::sceNet, "sceNetAdhocPtpConnect(%i, %i, %i) at %08x", id, timeout, flag, mips->pc);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, -1, "WLAN off");
 	}
 
@@ -4331,7 +4398,7 @@ static int sceNetAdhocPtpClose(MIPSState *mips, int id, int unknown) {
 	if (unknown != 0) {
 		return hleLogError(Log::sceNet, SCE_NET_ADHOC_ERROR_INVALID_ARG, "invalid flag");
 	}
-	/*if (!g_Config.bEnableWlan) {
+	/*if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, -1, "WLAN off");
 	}*/
 
@@ -4352,7 +4419,7 @@ static int sceNetAdhocPtpClose(MIPSState *mips, int id, int unknown) {
 
 static int sceNetAdhocPtpListen(MIPSState *mips, const char *srcmac, int sport, int bufsize, int rexmt_int, int rexmt_cnt, int backlog, int flag) {
 	INFO_LOG(Log::sceNet, "sceNetAdhocPtpListen(%s, %d, %d, %d, %d, %d, %d) at %08x", mac2str((SceNetEtherAddr*)srcmac).c_str(), sport,bufsize,rexmt_int,rexmt_cnt,backlog,flag, mips->pc);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, -1, "WLAN off");
 	}
 	// Library is initialized
@@ -5132,7 +5199,7 @@ static int sceNetAdhocctlGetPeerList(MIPSState *mips, u32 sizeAddr, u32 bufAddr)
 	}
 
 	DEBUG_LOG(Log::sceNet, "sceNetAdhocctlGetPeerList([%08x]=%i, %08x) at %08x", sizeAddr, /*buflen ? *buflen : -1*/Memory::ReadUnchecked_U32(sizeAddr), bufAddr, mips->pc);
-	if (!g_Config.bEnableWlan) {
+	if (!NetAdhocWlanEnabled()) {
 		return hleLogError(Log::sceNet, -1, "WLAN off");
 	}
 

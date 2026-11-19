@@ -2,11 +2,13 @@
 // Licensed under GPLv2 or later. See LICENSE.TXT.
 #include "Switch/GameShare/Integration.h"
 #include "Switch/GameShare/GuestApi.h"
+#include "Switch/GameShare/AdhocServer.h"
 #include "Switch/GameShare/CpuRenderer.h"
 #include "Common/System/OSD.h"
 #include "Common/Thread/ThreadUtil.h"
 #include "Core/Config.h"
 #include "Core/Core.h"
+#include "Core/HLE/GameShareAdhoc.h"
 #include "Core/MemMap.h"
 #include <gameshare/host.hpp>
 #include <gameshare/guest_display.hpp>
@@ -31,6 +33,8 @@ struct Frame {
 };
 std::atomic<bool> toggleRequested{false};
 struct Session {
+	GameShareAdhocServer adhoc;
+	bool localAdhoc = false;
 	std::shared_ptr<Switch2GuestCpuRenderer> renderer;
 	std::shared_ptr<gameshare::NativeGuestDisplay> display;
 	std::unique_ptr<gameshare::Host> host;
@@ -123,7 +127,7 @@ struct Session {
 			Message("The guest exited. Restart PPSSPP before creating another guest.", true);
 			return;
 		}
-		ppsspp_guest_set_active(true);
+		ppsspp_guest_set_active(true, false);
 		renderer = std::make_shared<Switch2GuestCpuRenderer>();
 		gameshare::RendererHooks hooks;
 		hooks.user = renderer.get();
@@ -148,9 +152,17 @@ struct Session {
 		presenterStop = true;
 		frameCondition.notify_all();
 		ppsspp_guest_input(nullptr);
-		ppsspp_guest_set_active(false);
+		ppsspp_guest_set_active(false, false);
+		StopAdhoc();
 		if (host) {
 			host->requestStop();
+		}
+	}
+	void StopAdhoc() {
+		if (localAdhoc) {
+			SetGameShareAdhocEnabled(false);
+			localAdhoc = false;
+			adhoc.Stop();
 		}
 	}
 	void StartPresenter() {
@@ -202,21 +214,35 @@ struct Session {
 			std::fprintf(stderr, "GameShare state: %d -> %d\n", static_cast<int>(previous), static_cast<int>(state));
 			previous = state;
 			if (state == gameshare::Host::State::Hosting) {
-				Message("GameShare connected. Guest controls its own PPSSPP instance.");
 				StartPresenter();
+				localAdhoc = adhoc.Start();
+				if (localAdhoc) {
+					const bool restart = GameShareAdhocNeedsRestart();
+					SetGameShareAdhocEnabled(true);
+					Message(restart ? "Restart the host game to use GameShare Ad Hoc." : "GameShare connected. Local Ad Hoc is available.");
+				} else {
+					Message("GameShare connected, but local Ad Hoc could not start.", true);
+				}
 			}
+		}
+		if (localAdhoc && !adhoc.Running()) {
+			StopAdhoc();
+			Message("GameShare Ad Hoc stopped.", true);
 		}
 		const int guest = ppsspp_guest_state();
 		if (guestStarted && guest != 1 && guest != 2) { Stop(); }
-		if (state == gameshare::Host::State::Hosting && !exiting && guest == 2) {
-			const auto input = host->controller();
-			const PpssppGuestInput converted{input.buttons, input.leftX, input.leftY, input.rightX, input.rightY, input.connected};
-			ppsspp_guest_input(&converted);
-			ppsspp_guest_set_active(true);
+		if (state == gameshare::Host::State::Hosting && !exiting && (guest == 1 || guest == 2)) {
+			if (guest == 2) {
+				const auto input = host->controller();
+				const PpssppGuestInput converted{input.buttons, input.leftX, input.leftY, input.rightX, input.rightY, input.connected};
+				ppsspp_guest_input(&converted);
+			}
+			ppsspp_guest_set_active(true, localAdhoc);
 		} else {
 			ppsspp_guest_input(nullptr);
 			if (state != gameshare::Host::State::Starting) {
-				ppsspp_guest_set_active(false);
+				StopAdhoc();
+				ppsspp_guest_set_active(false, false);
 				presenterStop = true;
 				frameCondition.notify_all();
 			}

@@ -133,6 +133,8 @@ void Register_sceNetAdhocDiscover();
 void Register_sceNetAdhocctl();
 
 
+bool NetAdhocWlanEnabled();
+uint16_t GetAdhocRelayPort();
 void __NetAdhocInit();
 void __NetAdhocShutdown();
 void __NetAdhocDoState(PointerWrap &p);

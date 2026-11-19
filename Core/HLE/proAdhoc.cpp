@@ -55,6 +55,7 @@
 #include "Core/HLE/sceKernelMemory.h"
 #include "Core/HLE/sceNetAdhoc.h"
 #include "Core/HLE/AdhocTransport.h"
+#include "Core/HLE/GameShareAdhoc.h"
 #include "Core/Instance.h"
 #include "proAdhoc.h"
 
@@ -133,6 +134,13 @@ static std::vector<ChatLogEntry> chatLog;
 static const size_t MAX_CHAT_LOG_LINES = 250;
 
 SockAddrIN4 GetAdhocServerIP() {
+	if (IsGameShareAdhoc()) {
+		SockAddrIN4 addr{};
+		addr.in.sin_family = AF_INET;
+		addr.in.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		addr.in.sin_port = htons(GAMESHARE_ADHOC_CTL_PORT);
+		return addr;
+	}
 	const std::lock_guard<std::mutex> adhoc_server_ip_guard(g_adhocServerIPMutex);
 	return g_adhocServerIP;
 }
@@ -1429,6 +1437,9 @@ static void StopAdhocctlKeepalive() {
 }
 
 static void ResolveAdhocServer() {
+	if (IsGameShareAdhoc()) {
+		return;
+	}
 	auto n = GetI18NCategory(I18NCat::NETWORKING);
 
 	// Resolve and cache AdhocServer DNS
@@ -1499,7 +1510,7 @@ static void StartAdhocctlLogin() {
 	// If Server is at localhost and we are in P2P mode, try to bind socket to specific adapter before connecting to prevent 2nd instance being recognized as already existing 127.0.0.1 by adhocctl server
 	// (may not works in WinXP/2003 for IPv4 due to "Weak End System" model)
 	struct adhocctl_addr_v4 bindAddr = {0};
-	const bool bind = isLocalServer && !serverHasRelay;
+	const bool bind = isLocalServer && !serverHasRelay && !IsGameShareAdhoc();
 	if (bind) {
 		bindAddr.ip = g_localhostIP.in.sin_addr.s_addr;
 		bindAddr.port = 0;
@@ -1511,7 +1522,7 @@ static void StartAdhocctlLogin() {
 	adhocctlLoginDone = false;
 	adhocctlLoginHandle = nullptr;
 	adhocctlLoginRunning = true;
-	adhocctlLoginThread = std::thread(AdhocctlLogin, !adhocServerResolved, bind, bindAddr, product_code, parameter.nickname, address, netAdhocUseUdp);
+	adhocctlLoginThread = std::thread(AdhocctlLogin, !adhocServerResolved, bind, bindAddr, product_code, parameter.nickname, address, netAdhocUseUdp && !IsGameShareAdhoc());
 	adhocServerResolved = true;
 }
 
@@ -1604,7 +1615,7 @@ void friendFinderPoll() {
 
 	// Reconnect when disconnected while Adhocctl is still inited
 	if (!adhocctlLoginRunning) {
-		if (netAdhocctlInited && isAdhocctlNeedLogin && g_Config.bEnableWlan) {
+		if (netAdhocctlInited && isAdhocctlNeedLogin && NetAdhocWlanEnabled()) {
 			bool alive;
 			{
 				const std::lock_guard<std::mutex> adhocctl_guard(adhocctlMutex);
@@ -2010,6 +2021,10 @@ int getRelativeLocalIpFromRoutingTable(const in_addr &target_ip, in_addr &local_
 }
 
 int getLocalIp(sockaddr_in* SocketAddress) {
+	if (IsGameShareAdhoc()) {
+		SocketAddress->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		return 0;
+	}
 	if (isLocalServer) {
 		SocketAddress->sin_addr = g_localhostIP.in.sin_addr;
 		return 0;

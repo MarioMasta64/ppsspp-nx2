@@ -29,6 +29,10 @@ endforeach()
 
 target_compile_definitions(${TargetBin} PRIVATE PPSSPP_SWITCH2_GAMESHARE=1)
 target_compile_definitions(ppsspp_ui PRIVATE PPSSPP_SWITCH2_GAMESHARE=1)
+set_property(SOURCE
+	"${CMAKE_SOURCE_DIR}/Core/HLE/sceNetAdhoc.cpp"
+	"${CMAKE_SOURCE_DIR}/Core/HLE/proAdhocServer.cpp"
+	TARGET_DIRECTORY Core APPEND PROPERTY COMPILE_DEFINITIONS PPSSPP_SWITCH2_GAMESHARE=1)
 add_library(PPSSPPSwitch2GuestFrontend OBJECT Switch/GameShare/GuestFrontend.cpp)
 target_compile_definitions(PPSSPPSwitch2GuestFrontend PRIVATE PPSSPP_SWITCH2_GAMESHARE=1)
 target_link_libraries(PPSSPPSwitch2GuestFrontend PRIVATE ppsspp_ui)
@@ -43,7 +47,8 @@ set_source_files_properties("${guest_object}" PROPERTIES GENERATED TRUE EXTERNAL
 target_sources(${TargetBin} PRIVATE "${guest_object}")
 # The Vulkan driver is linked statically and owns the process's GSV sessions.
 target_link_options(${TargetBin} PRIVATE "-Wl,--wrap=gsvGpuCreateSlotEvent,--wrap=gsvGpuOpenWorker,--wrap=gsvGpuClose")
-add_library(PPSSPPSwitch2GameShareBridge STATIC Switch/GameShare/Integration.cpp Switch/GameShare/CpuRenderer.cpp)
+add_library(PPSSPPSwitch2GameShareBridge STATIC Switch/GameShare/Integration.cpp Switch/GameShare/CpuRenderer.cpp Switch/GameShare/AdhocServer.cpp)
+target_compile_definitions(PPSSPPSwitch2GameShareBridge PRIVATE PPSSPP_SWITCH2_GAMESHARE=1)
 set(GAMESHARE_ENABLE_CPU_STREAMER OFF CACHE BOOL "" FORCE)
 add_subdirectory(Switch/GameShare/sdk)
 target_link_libraries(PPSSPPSwitch2GameShareBridge PRIVATE gameshare::gameshare Core)

@@ -129,9 +129,21 @@ if(WIN32)
 endif()
 
 if(LINUX OR ANDROID OR MACOSX OR IOS OR BSD OR NINTENDO_SWITCH2)
-	list(APPEND aemu_postoffice_server_obj
-		aemu_postoffice/server_cpp/native_socket_linux.cpp
-	)
+	set(aemu_server_socket aemu_postoffice/server_cpp/native_socket_linux.cpp)
+	if(NINTENDO_SWITCH2 AND PPSSPP_SWITCH2_GAMESHARE)
+		# Use a real IPv4 listener for the Switch loopback relay. inet_pton
+		# returns 0 on address-family mismatch, even with a valid address.
+		set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${aemu_server_socket}")
+		file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${aemu_server_socket}" aemu_server_socket_source)
+		string(REPLACE "ip.c_str(), &addr6.sin6_addr) == -1" "ip.c_str(), &addr6.sin6_addr) != 1"
+			aemu_server_socket_source "${aemu_server_socket_source}")
+		string(REPLACE "ip.c_str(), &addr4.sin_addr) == -1" "ip.c_str(), &addr4.sin_addr) != 1"
+			aemu_server_socket_source "${aemu_server_socket_source}")
+		set(aemu_server_socket "${CMAKE_CURRENT_BINARY_DIR}/switch2-postoffice-server-socket.cpp")
+		file(CONFIGURE OUTPUT "${aemu_server_socket}" CONTENT "${aemu_server_socket_source}" @ONLY)
+		set_source_files_properties("${aemu_server_socket}" PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/aemu_postoffice/server_cpp")
+	endif()
+	list(APPEND aemu_postoffice_server_obj "${aemu_server_socket}")
 endif()
 
 add_library(aemu_postoffice_server STATIC

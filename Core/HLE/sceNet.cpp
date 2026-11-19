@@ -1190,11 +1190,11 @@ static u32 sceNetGetLocalEtherAddr(u32 addrAddr) {
 }
 
 static u32 sceWlanDevIsPowerOn() {
-	return hleLogVerbose(Log::sceNet, g_Config.bEnableWlan ? 1 : 0);
+	return hleLogVerbose(Log::sceNet, NetAdhocWlanEnabled() ? 1 : 0);
 }
 
 static u32 sceWlanGetSwitchState() {
-	return hleLogVerbose(Log::sceNet, g_Config.bEnableWlan ? 1 : 0);
+	return hleLogVerbose(Log::sceNet, NetAdhocWlanEnabled() ? 1 : 0);
 }
 
 // Probably a void function, but often returns a useful value.

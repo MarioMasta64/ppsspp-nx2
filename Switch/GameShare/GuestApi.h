@@ -25,7 +25,7 @@ struct PpssppGuestIdentity {
 extern "C" {
 bool ppsspp_guest_start(const PpssppGuestHost *host);
 void ppsspp_guest_request_stop();
-void ppsspp_guest_set_active(bool active);
+void ppsspp_guest_set_active(bool active, bool localAdhoc);
 void ppsspp_guest_join();
 int ppsspp_guest_state();
 void ppsspp_guest_input(const PpssppGuestInput *input);

@@ -50,20 +50,20 @@
 #endif
 
 // User Count
-uint32_t _db_user_count = 0;
+static thread_local uint32_t _db_user_count = 0;
 
 // User Database
-SceNetAdhocctlUserNode * _db_user = NULL;
+static thread_local SceNetAdhocctlUserNode *_db_user = nullptr;
 
 // Game Database
-SceNetAdhocctlGameNode * _db_game = NULL;
+static thread_local SceNetAdhocctlGameNode *_db_game = nullptr;
 
 // Server Status
 std::atomic<bool> adhocServerRunning(false);
 std::thread adhocServerThread;
 
 // Crosslink database for cross region Adhoc play
-std::vector<db_crosslink> crosslinks;
+static thread_local std::vector<db_crosslink> crosslinks;
 static const db_crosslink default_crosslinks[] = {
 	// Ace Combat X2 - Joint Assault
 	{ "ULES01408", "ULUS10511" },
@@ -299,7 +299,7 @@ static const db_crosslink default_crosslinks[] = {
 	{ "ULES01474", "ULJM05734" },
 };
 
-std::vector<db_productid> productids;
+static thread_local std::vector<db_productid> productids;
 static const db_productid default_productids[] = {
 	{ "ULUS10511", "Ace Combat X2 - Joint Assault" },
 	{ "ULUS10245", "Alien Syndrome" },
@@ -479,10 +479,10 @@ void enable_address_reuse(int fd);
 void enable_keepalive(int fd);
 void change_nodelay_mode(int fd, int flag);
 void change_blocking_mode(int fd, int nonblocking);
-int create_listen_socket(uint16_t port);
-int server_loop(int server);
+static int create_listen_socket(uint16_t port, bool localOnly);
+static int server_loop(int server, const std::atomic<bool> &running);
 
-void __AdhocServerInit() {
+static void InitServerDatabase() {
 	// Database Product name will update if new game region played on my server to list possible crosslinks
 	productids = std::vector<db_productid>(default_productids, default_productids + ARRAY_SIZE(default_productids));
 	crosslinks = std::vector<db_crosslink>(default_crosslinks, default_crosslinks + ARRAY_SIZE(default_crosslinks));
@@ -1688,7 +1688,7 @@ int proAdhocServerThread(int port) // (int argc, char * argv[])
 	//signal(SIGTERM, interrupt);
 
 	// Create Listening Socket
-	int server = create_listen_socket(port); //SERVER_PORT
+	int server = create_listen_socket(port, false);
 
 	// Created Listening Socket
 	if(server != SOCKET_ERROR)
@@ -1700,7 +1700,7 @@ int proAdhocServerThread(int port) // (int argc, char * argv[])
 		UPnP_Add(IP_PROTOCOL_TCP, port); // g_PortManager.Add(IP_PROTOCOL_TCP, port);
 
 		// Enter Server Loop
-		result = server_loop(server);
+		result = server_loop(server, adhocServerRunning);
 
 		// Remove Port mapping
 		UPnP_Remove(IP_PROTOCOL_TCP, port); // g_PortManager.Remove(IP_PROTOCOL_TCP, port);
@@ -1805,7 +1805,7 @@ void change_blocking_mode(int fd, int nonblocking)
  * @param port TCP Port
  * @return Socket Descriptor
  */
-int create_listen_socket(uint16_t port)
+static int create_listen_socket(uint16_t port, bool localOnly)
 {
 	// Create Socket
 	int fd = (int)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -1820,7 +1820,12 @@ int create_listen_socket(uint16_t port)
 		enable_keepalive(fd);
 
 		// Enable Address Reuse
-		enable_address_reuse(fd); // Shouldn't Reuse the port for built-in AdhocServer to prevent conflict with Dedicated AdhocServer
+		if (localOnly) {
+			const int reuse = 1;
+			setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
+		} else {
+			enable_address_reuse(fd);
+		}
 
 		// Make Socket Nonblocking
 		change_blocking_mode(fd, 1);
@@ -1832,25 +1837,22 @@ int create_listen_socket(uint16_t port)
 		struct sockaddr_in local;
 		memset(&local, 0, sizeof(local));
 		local.sin_family = AF_INET;
-		local.sin_addr.s_addr = INADDR_ANY;
+		local.sin_addr.s_addr = localOnly ? htonl(INADDR_LOOPBACK) : INADDR_ANY;
 		local.sin_port = htons(port);
 
 		// Bind Local Address to Socket
 		int bindresult = bind(fd, (struct sockaddr *)&local, sizeof(local));
 
 		// Bound Local Address to Socket
-		if(bindresult != SOCKET_ERROR)
+		if (bindresult != SOCKET_ERROR && listen(fd, SERVER_LISTEN_BACKLOG) != SOCKET_ERROR)
 		{
-			// Switch Socket into Listening Mode
-			listen(fd, SERVER_LISTEN_BACKLOG);
-
 			// Return Socket
 			return fd;
 		}
 
 		// Notify User
 		else {
-			ERROR_LOG(Log::sceNet, "AdhocServer: Bind returned %i (Socket error %d)", bindresult, socket_errno);
+			ERROR_LOG(Log::sceNet, "AdhocServer: Failed to listen on port %u (socket error %d)", port, socket_errno);
 			auto n = GetI18NCategory(I18NCat::NETWORKING);
 			g_OSD.Show(OSDType::MESSAGE_ERROR, std::string(n->T("AdhocServer Failed to Bind Port")) + " " + std::to_string(port), "portbindfail");
 		}
@@ -1866,20 +1868,31 @@ int create_listen_socket(uint16_t port)
 	return -1;
 }
 
+#if defined(PPSSPP_SWITCH2_GAMESHARE)
+int OpenGameShareAdhocControl(uint16_t port) {
+	return create_listen_socket(port, true);
+}
+
+void RunGameShareAdhocControl(int listener, const std::atomic<bool> &running) {
+	SetCurrentThreadName("GameShare Adhocctl");
+	server_loop(listener, running);
+}
+#endif
+
 /**
  * Server Main Loop
  * @param server Server Listening Socket
  * @return OS Error Code
  */
-int server_loop(int server)
+static int server_loop(int server, const std::atomic<bool> &running)
 {
-	// adhocServerRunning was set by whoever started the thread, and is cleared to stop it.
+	InitServerDatabase();
 
 	// Create Empty Status Logfile
 	update_status();
 
 	// Handling Loop
-	while (adhocServerRunning) //(_status == 1)
+	while (running)
 	{
 		// Login Block
 		{
