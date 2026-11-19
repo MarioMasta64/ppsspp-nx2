@@ -1938,11 +1938,6 @@ bool VKContext::CopyFramebufferToMemory(Framebuffer *srcfb, Aspect aspects, int 
 		return false;
 	}
 	VKFramebuffer *src = (VKFramebuffer *)srcfb;
-	if (!src && vulkan_->GetSwapchain() == VK_NULL_HANDLE) {
-		// No backbuffer to read, as in headless.
-		return false;
-	}
-
 	int aspectMask = 0;
 	if (aspects & Aspect::COLOR_BIT) aspectMask |= VK_IMAGE_ASPECT_COLOR_BIT;
 	if (aspects & Aspect::DEPTH_BIT) aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;

@@ -1453,6 +1453,41 @@ void VulkanRenderManager::BindFramebufferAsRenderTarget(VKRFramebuffer *fb, VKRR
 bool VulkanRenderManager::CopyFramebufferToMemory(VKRFramebuffer *src, VkImageAspectFlags aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride, Draw::ReadbackMode mode, const char *tag) {
 	_dbg_assert_(insideFrame_);
 
+	if (!src && (!vulkan_->SupportsBackbufferReadback() || aspectBits != VK_IMAGE_ASPECT_COLOR_BIT)) {
+		return false;
+	}
+
+	Draw::DataFormat srcFormat = Draw::DataFormat::UNDEFINED;
+	if (aspectBits & VK_IMAGE_ASPECT_COLOR_BIT) {
+		if (src) {
+			switch (src->color.format) {
+			case VK_FORMAT_R8G8B8A8_UNORM: srcFormat = Draw::DataFormat::R8G8B8A8_UNORM; break;
+			default: _assert_(false);
+			}
+		} else {
+			switch (vulkan_->GetSwapchainFormat()) {
+			case VK_FORMAT_B8G8R8A8_UNORM: srcFormat = Draw::DataFormat::B8G8R8A8_UNORM; break;
+			case VK_FORMAT_R8G8B8A8_UNORM: srcFormat = Draw::DataFormat::R8G8B8A8_UNORM; break;
+			// NOTE: If you add supported formats here, make sure to also support them in VulkanQueueRunner::CopyReadbackBuffer.
+			default:
+				ERROR_LOG(Log::G3D, "Unsupported backbuffer format for screenshots");
+				return false;
+			}
+		}
+	} else if (aspectBits & VK_IMAGE_ASPECT_STENCIL_BIT) {
+		// Copies from stencil are always S8.
+		srcFormat = Draw::DataFormat::S8;
+	} else if (aspectBits & VK_IMAGE_ASPECT_DEPTH_BIT) {
+		switch (src->depth.format) {
+		case VK_FORMAT_D24_UNORM_S8_UINT: srcFormat = Draw::DataFormat::D24_S8; break;
+		case VK_FORMAT_D32_SFLOAT_S8_UINT: srcFormat = Draw::DataFormat::D32F; break;
+		case VK_FORMAT_D16_UNORM_S8_UINT: srcFormat = Draw::DataFormat::D16; break;
+		default: _assert_(false);
+		}
+	} else {
+		_assert_(false);
+	}
+
 	if (!src && mode == Draw::ReadbackMode::OLD_DATA_OK) {
 		// The backbuffer is a different image every frame, so there's no earlier copy of it to hand back.
 		_dbg_assert_msg_(false, "Delayed readback of the backbuffer (%s)", tag);
@@ -1482,44 +1517,13 @@ bool VulkanRenderManager::CopyFramebufferToMemory(VKRFramebuffer *src, VkImageAs
 		FlushSync();
 	}
 
-	Draw::DataFormat srcFormat = Draw::DataFormat::UNDEFINED;
-	if (aspectBits & VK_IMAGE_ASPECT_COLOR_BIT) {
-		if (src) {
-			switch (src->color.format) {
-			case VK_FORMAT_R8G8B8A8_UNORM: srcFormat = Draw::DataFormat::R8G8B8A8_UNORM; break;
-			default: _assert_(false);
-			}
-		} else {
-			// Backbuffer.
-			if (!(vulkan_->GetSurfaceCapabilities().supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
-				ERROR_LOG(Log::G3D, "Copying from backbuffer not supported, can't take screenshots");
-				return false;
-			}
-			switch (vulkan_->GetSwapchainFormat()) {
-			case VK_FORMAT_B8G8R8A8_UNORM: srcFormat = Draw::DataFormat::B8G8R8A8_UNORM; break;
-			case VK_FORMAT_R8G8B8A8_UNORM: srcFormat = Draw::DataFormat::R8G8B8A8_UNORM; break;
-			// NOTE: If you add supported formats here, make sure to also support them in VulkanQueueRunner::CopyReadbackBuffer.
-			default:
-				ERROR_LOG(Log::G3D, "Unsupported backbuffer format for screenshots");
-				return false;
-			}
-		}
-	} else if (aspectBits & VK_IMAGE_ASPECT_STENCIL_BIT) {
-		// Copies from stencil are always S8.
-		srcFormat = Draw::DataFormat::S8;
-	} else if (aspectBits & VK_IMAGE_ASPECT_DEPTH_BIT) {
-		switch (src->depth.format) {
-		case VK_FORMAT_D24_UNORM_S8_UINT: srcFormat = Draw::DataFormat::D24_S8; break;
-		case VK_FORMAT_D32_SFLOAT_S8_UINT: srcFormat = Draw::DataFormat::D32F; break;
-		case VK_FORMAT_D16_UNORM_S8_UINT: srcFormat = Draw::DataFormat::D16; break;
-		default: _assert_(false);
-		}
-	} else {
-		_assert_(false);
+	auto &frame = frameData_[vulkan_->GetCurFrame()];
+	if (!src && (!frame.hasAcquired || frame.skipSwap)) {
+		return false;
 	}
 
 	// Need to call this after FlushSync so the pixels are guaranteed to be ready in CPU-accessible VRAM.
-	return queueRunner_.CopyReadbackBuffer(frameData_[vulkan_->GetCurFrame()],
+	return queueRunner_.CopyReadbackBuffer(frame,
 		mode == Draw::ReadbackMode::OLD_DATA_OK ? src : nullptr, x, y, w, h, aspectBits, srcFormat, destFormat, pixelStride, pixels);
 }
 

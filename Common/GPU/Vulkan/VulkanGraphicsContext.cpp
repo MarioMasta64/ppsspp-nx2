@@ -150,6 +150,7 @@ public:
 	VkImage GetImage(uint32_t index) const override { return images_[index].image; }
 	VkExtent2D GetExtent() const override { return extent_; }
 	VkFormat GetFormat() const override { return format_; }
+	bool SupportsBackbufferReadback() const override { return true; }
 	VkImageLayout GetPresentLayout() const override { return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; }
 
 private:

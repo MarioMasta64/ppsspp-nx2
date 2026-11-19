@@ -165,3 +165,12 @@ Vulkan initialization. The revised uploader uses the existing driver session.
 The host also joins the SDK thread after terminal states before asking if
 native resources were retained, so a completed thread alone no longer forces a
 title restart. Confirm pairing, guest frames and stop/restart on hardware.
+
+The shared-session build paired with the client, and the SDK completed cleanup.
+The client remained black because PPSSPP rejected readback from the guest's
+offscreen Vulkan presentation before any frame could reach the uploader.
+Offscreen presentation now declares its transfer-source capability. The copy
+waits for the color attachment writes and skips frames without an acquired
+image. A local MoltenVK run cleared three consecutive offscreen frames to
+different colors and verified every returned RGBA byte. Client presentation
+and independent input still require a console check.

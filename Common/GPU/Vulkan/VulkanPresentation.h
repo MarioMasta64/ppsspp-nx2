@@ -40,6 +40,8 @@ public:
 	virtual VkImage GetImage(uint32_t index) const = 0;
 	virtual VkExtent2D GetExtent() const = 0;
 	virtual VkFormat GetFormat() const = 0;
+	// Only backends whose presentable images were created with TRANSFER_SRC can opt in.
+	virtual bool SupportsBackbufferReadback() const { return false; }
 	// Array layers per image. Two makes the backbuffer pass multiview, one view per layer (VR).
 	virtual uint32_t GetImageLayers() const { return 1; }
 

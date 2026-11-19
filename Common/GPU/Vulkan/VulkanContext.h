@@ -406,6 +406,12 @@ public:
 
 	VkSwapchainKHR GetSwapchain() const { return swapchain_; }
 	VkFormat GetSwapchainFormat() const { return presentation_ ? presentation_->GetFormat() : swapchainFormat_; }
+	bool SupportsBackbufferReadback() const {
+		if (presentation_) {
+			return presentation_->SupportsBackbufferReadback();
+		}
+		return swapchain_ != VK_NULL_HANDLE && (surfCapabilities_.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+	}
 	bool IsSwapchainInited() const { return swapchainInited_; }
 	// True when we chose a pre-transform that doesn't match the surface's current one (we refuse 270
 	// degrees, see InitSwapchain). The driver then reports VK_SUBOPTIMAL_KHR on every present, which

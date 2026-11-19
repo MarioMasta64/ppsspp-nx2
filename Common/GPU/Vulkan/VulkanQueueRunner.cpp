@@ -1903,12 +1903,14 @@ void VulkanQueueRunner::PerformReadback(const VKRStep &step, VkCommandBuffer cmd
 	VkImageLayout copyLayout;
 	// Special case for backbuffer readbacks.
 	if (step.readback.src == nullptr) {
-		// We only take screenshots after the main render pass (anything else would be stupid) so we need to transition out of PRESENT,
-		// and then back into it.
-		// Regarding layers, backbuffer currently only has one layer.
+		if (!frameData.hasAcquired || frameData.skipSwap) {
+			return;
+		}
+		// Make the render pass's color writes visible to the copy, including when
+		// an offscreen presentation already ends in the transfer-source layout.
 		recordBarrier_.TransitionImage(backbufferImage_, 0, 1, 1, VK_IMAGE_ASPECT_COLOR_BIT,
 			vulkan_->GetPresentLayout(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			0, VK_ACCESS_TRANSFER_READ_BIT,
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
 			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 		copyLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 		image = backbufferImage_;
