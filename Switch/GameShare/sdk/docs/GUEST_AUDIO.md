@@ -31,9 +31,12 @@ The app-facing input in this experiment is interleaved PCM16 stereo at
 
 The earlier PPSSPP console tests found silence on the client with both
 AudOut and Audren when relying on application-mix mirroring. The direct
-mode leaves that flag disabled. The native worker queries free space after
-the guest connects, limits queued audio, and retains unwritten PCM after a
-partial write. If direct audio fails, the worker logs the Result and leaves
+mode leaves that flag disabled. After connection, the native worker targets
+up to 1536 queued frames (32 ms at 48 kHz), limited by the native capacity.
+A delayed poll can refill multiple 512-frame chunks in one pass. A partial
+or zero write keeps its unwritten PCM for the next poll. The worker logs
+empty-queue observations after the first accepted write. If direct audio
+fails, the worker logs the Result and leaves
 the separate video and controller working. A successful write confirms
 queue acceptance. The physical audio check determines whether the guest
 actually heard the samples and whether the host retained only its own mix.

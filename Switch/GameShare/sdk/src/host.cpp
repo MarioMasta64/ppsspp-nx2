@@ -82,10 +82,13 @@ static_assert(sizeof(GuestBuffers) == 32 && sizeof(MatchConfig) == 32);
 static_assert(sizeof(AudioConfig) == 16);
 struct GuestAudioWrite { u8 guest; u8 reserved[3]; u32 frames; };
 static_assert(sizeof(GuestAudioWrite) == 8 && offsetof(GuestAudioWrite, frames) == 4);
-constexpr u32 GuestAudioTargetFrames = 1024;
+constexpr u32 GuestAudioTargetFrames = 1536;
+constexpr unsigned GuestAudioMaxWritesPerPoll = 4;
 struct GuestAudioFeed {
     std::array<std::int16_t, GuestAudioMaxFrames * 2> pcm{};
     u32 capacity = 0, pending = 0, offset = 0;
+    u32 emptyPolls = 0;
+    u64 nextStats = 0;
     bool disabled = false, loggedWrite = false;
 };
 }
@@ -407,7 +410,7 @@ struct Host::Impl {
         std::snprintf(text, sizeof(text), "GameShare: guest audio %s failed (0x%X).", stage, unsigned(rc));
         log(LogLevel::Error, text);
     }
-    void pumpGuestAudio(GuestAudioFeed& feed) {
+    void pumpGuestAudio(GuestAudioFeed& feed, u64 now) {
         if (!config.guestAudio || feed.disabled) return;
         if (!feed.capacity) {
             const Result rc = serviceDispatchOut(&scoped, 41, feed.capacity);
@@ -428,32 +431,51 @@ struct Host::Impl {
         }
         const u32 target = std::min(feed.capacity, GuestAudioTargetFrames);
         const u32 filled = feed.capacity - free;
+        if (feed.loggedWrite) {
+            if (!filled) ++feed.emptyPolls;
+            if (now >= feed.nextStats) {
+                if (feed.emptyPolls) {
+                    char message[96];
+                    std::snprintf(message, sizeof(message), "GameShare: guest audio queue observed empty %u times.", unsigned(feed.emptyPolls));
+                    log(LogLevel::Info, message);
+                    feed.emptyPolls = 0;
+                }
+                feed.nextStats = now + 5000;
+            }
+        }
         if (filled >= target) return;
-        u32 frames = std::min(target - filled, GuestAudioMaxFrames);
-        if (feed.pending) {
-            frames = std::min(frames, feed.pending);
-        } else {
-            try { config.guestAudio(config.guestAudioUser, feed.pcm.data(), frames); }
-            catch (...) { disableGuestAudio(feed, "callback", badInput()); return; }
-            feed.pending = frames;
-            feed.offset = 0;
-        }
-        const GuestAudioWrite request{guest, {}, frames};
-        u32 accepted = 0;
-        rc = serviceDispatchInOut(&scoped, 40, request, accepted,
-            .buffer_attrs = {SfBufferAttr_In | SfBufferAttr_HipcAutoSelect},
-            .buffers = {{feed.pcm.data() + feed.offset * 2, frames * 2 * sizeof(std::int16_t)}});
-        if (R_FAILED(rc) || accepted > frames) {
-            disableGuestAudio(feed, "submit PCM", R_FAILED(rc) ? rc : badInput());
-            return;
-        }
-        feed.offset += accepted;
-        feed.pending -= accepted;
-        if (accepted && !feed.loggedWrite) {
-            feed.loggedWrite = true;
-            char message[96];
-            std::snprintf(message, sizeof(message), "GameShare: guest audio accepted %u PCM frames.", unsigned(accepted));
-            log(LogLevel::Info, message);
+        // Refill from the same free-space snapshot. A delayed poll can lose
+        // more than one chunk's worth of audio, so allow a bounded catch-up.
+        u32 deficit = target - filled;
+        for (unsigned writes = 0; deficit && writes < GuestAudioMaxWritesPerPoll && !stopping; ++writes) {
+            const u32 frames = std::min(deficit, feed.pending ? feed.pending : GuestAudioMaxFrames);
+            if (!feed.pending) {
+                try { config.guestAudio(config.guestAudioUser, feed.pcm.data(), frames); }
+                catch (...) { disableGuestAudio(feed, "callback", badInput()); return; }
+                feed.pending = frames;
+                feed.offset = 0;
+            }
+            const GuestAudioWrite request{guest, {}, frames};
+            u32 accepted = 0;
+            rc = serviceDispatchInOut(&scoped, 40, request, accepted,
+                .buffer_attrs = {SfBufferAttr_In | SfBufferAttr_HipcAutoSelect},
+                .buffers = {{feed.pcm.data() + feed.offset * 2, frames * 2 * sizeof(std::int16_t)}});
+            if (R_FAILED(rc) || accepted > frames) {
+                disableGuestAudio(feed, "submit PCM", R_FAILED(rc) ? rc : badInput());
+                return;
+            }
+            feed.offset += accepted;
+            feed.pending -= accepted;
+            deficit -= accepted;
+            if (accepted && !feed.loggedWrite) {
+                feed.loggedWrite = true;
+                feed.nextStats = now + 5000;
+                char message[96];
+                std::snprintf(message, sizeof(message), "GameShare: guest audio accepted %u PCM frames.", unsigned(accepted));
+                log(LogLevel::Info, message);
+            }
+            // A short write is backpressure. Retry the tail on the next poll.
+            if (accepted < frames) break;
         }
     }
     void poll() {
@@ -489,7 +511,7 @@ struct Host::Impl {
                     clearSample(); // Never leave a held button after stalled HID.
                 }
             }
-            pumpGuestAudio(guestAudioFeed);
+            pumpGuestAudio(guestAudioFeed, now);
             if (now >= nextAudio) {
                 if (!updateAudio()) return;
                 nextAudio = now + 1000;
