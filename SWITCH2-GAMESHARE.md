@@ -64,9 +64,10 @@ The GameShare SDK is vendored from Moonlight-Switch's research worktree.
 hashes. Its MIT license and per-file ISC notices are retained. The SDK's pinned
 CPU-console uploader is disabled. The guest renderer borrows the statically
 linked OunceVK driver's GSV main and worker sessions and uses its registered VM.
-It owns the guest image backing, registrations, client and completion event.
-The adapter tracks the driver's occupied slots at the libounce call boundary
-and reserves a free slot for guest range retirement. It does not access
+It owns the guest image backing, registrations and client. The adapter tracks
+the driver's occupied slots at the libounce call boundary and reserves a free
+slot for guest range retirement. Each GameShare session reuses the reserved
+slot's completion event, which closes with the Vulkan driver's GPU. It does not access
 OunceVK's internal structs. Retire the guest images before Vulkan teardown.
 Coexistence and reuse on hardware still require qualification.
 

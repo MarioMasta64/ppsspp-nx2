@@ -24,7 +24,8 @@ inline int roots = 1, syncs = 1, gpu = 0, events = 0, clients = 0;
 inline uint32_t lastSlot = 3, openedSlot = 0;
 inline int ranges = 0, memory = 0, images = 0, aliases = 0;
 inline uint32_t id = 10;
-inline bool retired = false, counterReady = true;
+inline bool retired = false, counterReady = true, slotRegistered = false;
+inline unsigned slotCreations = 0;
 inline uint64_t ticks = 0;
 inline std::string fail;
 inline int failAt = 1, seen = 0;
@@ -32,7 +33,8 @@ inline std::map<uint32_t, uintptr_t> memoryAddress;
 inline std::map<uint32_t, uint32_t> imageMemory;
 inline const uint8_t *presented = nullptr;
 inline Result failure(const char *name) { return fail == name && ++seen == failAt ? 0xdead : 0; }
-inline bool clean() { return roots == 1 && syncs == 1 && !events && !clients && !ranges && !memory && !images && !aliases; }
+inline bool sessionClean() { return roots == 1 && syncs == 1 && !clients && !ranges && !memory && !images && !aliases; }
+inline bool clean() { return sessionClean() && !events; }
 }
 inline uint64_t armGetSystemTick() { return fake::ticks; }
 inline uint64_t armNsToTicks(uint64_t ns) { return ns; }
@@ -64,9 +66,18 @@ inline void gsvMakeImageLayout(GsvImageLayout *, uint32_t, uint32_t, uint32_t, u
 inline Result gsvGetImageSize(GsvImageLayout *, uint64_t *out) { *out = 5120 * 768; return 0; }
 inline Result gsvGpuRegisterMemory(GsvGpu *, uint64_t, uint64_t, uint8_t, uint32_t *out) { ++fake::ranges; *out = 42; return 0; }
 inline Result gsvGpuUnregisterMemory(GsvGpu *gpu, uint32_t, uint32_t slot) { assert(gpu->unused == 7 && slot == fake::openedSlot); return 0; }
-inline Result eventClear(Event *) { return 0; }
-inline Result eventWait(Event *, uint64_t) { if (Result rc = fake::failure(__func__)) { return rc; } --fake::ranges; return 0; }
-inline void eventClose(Event *) { --fake::events; }
+inline Result eventClear(Event *event) { assert(event->unused == 1 && fake::events == 1); return 0; }
+inline Result eventWait(Event *event, uint64_t) {
+    assert(event->unused == 1 && fake::events == 1);
+    if (Result rc = fake::failure(__func__)) { return rc; }
+    --fake::ranges;
+    return 0;
+}
+inline void eventClose(Event *event) {
+    assert(event->unused == 1 && fake::events == 1);
+    event->unused = 0;
+    --fake::events;
+}
 inline Result gsvReserveImageMemory(uint8_t, uint64_t, uint32_t *out) { ++fake::memory; *out = ++fake::id; return 0; }
 inline Result gsvRegisterImageMemory(uint32_t id, uint64_t address, uint64_t, uint32_t, uint64_t) { fake::memoryAddress[id] = address; return 0; }
 inline Result gsvCreateImage(GsvImageLayout *, uint32_t memory, uint32_t *out) { if (Result rc = fake::failure(__func__)) { return rc; } ++fake::images; *out = ++fake::id; fake::imageMemory[*out] = memory; return 0; }

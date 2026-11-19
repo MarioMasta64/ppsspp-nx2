@@ -10,11 +10,17 @@ extern "C" Result __wrap_gsvGpuCreateSlotEvent(GsvGpu *, uint32_t, Event *, bool
 extern "C" Result __wrap_gsvGpuOpenWorker(GsvGpu *, uint32_t, Event *);
 extern "C" void __wrap_gsvGpuClose(GsvGpu *);
 
-extern "C" Result __real_gsvGpuCreateSlotEvent(GsvGpu *gpu, uint32_t slot, Event *, bool) {
+extern "C" Result __real_gsvGpuCreateSlotEvent(GsvGpu *gpu, uint32_t slot, Event *event, bool) {
 	assert(gpu->unused == 7);
 	if (slot >= 2) {
 		assert(slot == 2 && fake::lastSlot >= slot);
+		if (fake::slotRegistered) {
+			return 0x200f3;
+		}
+		fake::slotRegistered = true;
+		++fake::slotCreations;
 		fake::openedSlot = slot;
+		event->unused = 1;
 		++fake::events;
 	}
 	return 0;
@@ -29,6 +35,7 @@ extern "C" Result __real_gsvGpuOpenWorker(GsvGpu *gpu, uint32_t slot, Event *) {
 
 extern "C" void __real_gsvGpuClose(GsvGpu *gpu) {
 	assert(gpu->unused == 7 && fake::gpu == 1 && fake::clean());
+	fake::slotRegistered = false;
 	gpu->unused = 0;
 	--fake::gpu;
 }
@@ -65,14 +72,17 @@ int main(int argc, char **argv) {
 			pixels[y * stride + x * 4 + 3] = 255;
 		}
 	}
-	{
+	const unsigned sessions = mode == "reconnect" ? 2 : 1;
+	for (unsigned session = 0; session < sessions; ++session) {
+		fake::retired = false;
 		Switch2GuestCpuRenderer renderer;
 		if (mode == "partial") { fake::fail = "gsvCreateImage"; fake::failAt = 2; }
 		const auto opened = renderer.Open(&layer);
 		if (mode == "partial") {
 			assert(opened == 0xdead);
 			assert(renderer.Retire() == 0);
-			assert(fake::clean());
+			assert(fake::sessionClean() && fake::events == 1);
+			__wrap_gsvGpuClose(&driver);
 			return 0;
 		}
 		assert(opened == 0);
@@ -97,16 +107,18 @@ int main(int argc, char **argv) {
 		if (mode == "range-timeout") { fake::fail = "eventWait"; }
 		if (mode == "unregister-failure") { fake::fail = "vi2UnregisterLayerImage"; }
 		const auto retired = renderer.Retire();
-		if (mode != "clean") {
+		if (mode != "clean" && mode != "reconnect") {
 			assert(retired != 0);
 			assert(fake::ranges == 1 && fake::gpu == 1);
 			assert(renderer.Retire() == retired);
 			return 0;
 		}
 		assert(retired == 0);
-		assert(fake::retired && fake::clean());
+		assert(fake::retired && fake::sessionClean());
+		assert(fake::events == 1 && fake::slotCreations == 1);
+		assert(__wrap_gsvGpuCreateSlotEvent(&driver, 2, &driverEvent, false) != 0);
 		assert(renderer.Retire() == 0);
 	}
-	assert(fake::clean());
 	__wrap_gsvGpuClose(&driver);
+	assert(fake::clean() && !fake::slotRegistered);
 }
