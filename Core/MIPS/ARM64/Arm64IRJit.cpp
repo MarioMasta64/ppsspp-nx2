@@ -47,6 +47,10 @@ Arm64JitBackend::Arm64JitBackend(JitOptions &jitopt)
 #ifdef MASKED_PSP_MEMORY
 	jo.enablePointerify = false;
 #endif
+#if defined(__SWITCH2__)
+	// Tekken's startup faults with static GPR allocation on this port.
+	jo.useStaticAlloc = false;
+#endif
 
 	// Since we store the offset, this is as big as it can be.
 	AllocCodeSpace(NATIVE_CODE_SPACE_SIZE);

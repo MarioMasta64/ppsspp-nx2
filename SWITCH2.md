@@ -196,3 +196,25 @@ concurrent producers, reuse and destructor cleanup. Regression risk is worker
 lifetime and shutdown ordering; a stuck dedicated task can delay shutdown.
 This fixes the traced termination path; Tekken gameplay and the original
 ARM64-JIT guest-memory error still require console qualification.
+
+## Qualified game-start path (2026-11-19)
+
+After the dedicated-worker fix, the user confirmed Tekken starts with the CPU
+interpreter, with low speed. With ARM64 JIT enabled and static GPR allocation
+disabled, the user confirmed the game works and is faster. The native backend
+now disables static GPR allocation on Switch 2 regardless of global/per-game
+configuration. Other JIT optimizations remain available. This is a qualified
+workaround; the underlying static-allocation failure is not yet explained.
+Regression risk is Switch 2 JIT performance relative to that optimization;
+this does not change the PSP clock, emulated instruction semantics or
+serialized state. Sound, measured FPS and sustained play remain unqualified.
+
+One intermittent crash before the PPSSPP menu was reported. The following
+launch succeeded, replacing that run's logs, so its cause remains unknown.
+
+Validation for the worker fix: the focused ASan/UBSan checks passed; the host
+unit suite passed all 102 tests. The PSP suite passed 527 executed
+single-instance cases and all ten paired relay scenarios. Eleven paired P2P
+scenarios remain unrun because this Mac lacks the required `127.0.0.2` alias;
+the aggregate runner consequently returned failure. No new executed test
+failures were observed. Native compilation and package/icon validation passed.
