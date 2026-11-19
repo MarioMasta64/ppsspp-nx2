@@ -36,6 +36,10 @@ endif()
 set(SKIP_GLSLANG_INSTALL ON CACHE BOOL "" FORCE)
 set(ENABLE_GLSLANG_INSTALL OFF)
 add_subdirectory(glslang EXCLUDE_FROM_ALL)
+if(NINTENDO_SWITCH2 AND NOT TARGET OSDependent)
+	add_library(OSDependent STATIC glslang/glslang/OSDependent/Unix/ossource.cpp)
+	target_include_directories(OSDependent PRIVATE glslang)
+endif()
 add_subdirectory(snappy)
 add_subdirectory(lua-build)
 add_subdirectory(at3_standalone)
@@ -63,6 +67,23 @@ add_library(libdeflate STATIC
 	libdeflate/lib/utils.c
 )
 
+set(aemu_enet_client aemu_postoffice/client/enet.c)
+if(NINTENDO_SWITCH2)
+	# The PSP's IPv4 conversion is also needed with libounce. Keep the pinned
+	# dependency unchanged and generate just this transport adapter in the build.
+	file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${aemu_enet_client}" aemu_enet_source)
+	string(REPLACE "\t\t#ifdef __PSP__" "\t\t#ifdef ENET_IPV4_ONLY" aemu_enet_source "${aemu_enet_source}")
+	set(aemu_enet_client "${CMAKE_CURRENT_BINARY_DIR}/switch2-enet-client.c")
+	set(aemu_enet_existing "")
+	if(EXISTS "${aemu_enet_client}")
+		file(READ "${aemu_enet_client}" aemu_enet_existing)
+	endif()
+	if(NOT aemu_enet_existing STREQUAL aemu_enet_source)
+		file(WRITE "${aemu_enet_client}" "${aemu_enet_source}")
+	endif()
+	set_source_files_properties("${aemu_enet_client}" PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/aemu_postoffice/client")
+endif()
+
 set(aemu_postoffice_client_obj
 	aemu_postoffice/client/postoffice.c
 	aemu_postoffice/client/postoffice_mem_stdc.c
@@ -70,7 +91,7 @@ set(aemu_postoffice_client_obj
 	aemu_postoffice/client/delay_impl_cpp.cpp
 	aemu_postoffice/client/log_impl_ppsspp.cpp
 	aemu_postoffice/client/list.c
-	aemu_postoffice/client/enet.c
+	${aemu_enet_client}
 	aemu_postoffice/adhocctl/client/adhocctl.c
 	aemu_postoffice/adhocctl/client/adhocctl_mem.c
 )
@@ -81,7 +102,7 @@ if(WIN32)
 	)
 endif()
 
-if(LINUX OR ANDROID OR MACOSX OR IOS OR BSD)
+if(LINUX OR ANDROID OR MACOSX OR IOS OR BSD OR NINTENDO_SWITCH2)
 	list(APPEND aemu_postoffice_client_obj
 		aemu_postoffice/client/sock_impl_linux.c
 	)
@@ -107,7 +128,7 @@ if(WIN32)
 	)
 endif()
 
-if(LINUX OR ANDROID OR MACOSX OR IOS OR BSD)
+if(LINUX OR ANDROID OR MACOSX OR IOS OR BSD OR NINTENDO_SWITCH2)
 	list(APPEND aemu_postoffice_server_obj
 		aemu_postoffice/server_cpp/native_socket_linux.cpp
 	)
@@ -130,6 +151,9 @@ endif()
 
 if(NOT LIBRETRO)
     add_subdirectory(imgui)
+    if(NINTENDO_SWITCH2)
+        target_compile_definitions(imgui PRIVATE IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS)
+    endif()
 endif()
 if(NOT HTTPS_NOT_AVAILABLE)
 	add_subdirectory(naett-build)

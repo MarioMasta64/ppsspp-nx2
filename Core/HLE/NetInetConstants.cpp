@@ -821,8 +821,10 @@ int convertInetErrnoHost2PSP(int error) {
 		return ERROR_INET_EAFNOSUPPORT;
 	case ENOTSOCK:
 		return ERROR_INET_ENOTSOCK;
+	#if ESHUTDOWN != ENETDOWN
 	case ESHUTDOWN:
 		return ERROR_INET_ESHUTDOWN;
+	#endif
 	case ECONNREFUSED:
 		return ERROR_INET_ECONNREFUSED;
 	case EADDRINUSE:
@@ -843,8 +845,10 @@ int convertInetErrnoHost2PSP(int error) {
 		return ERROR_INET_EALREADY;
 	case EPROTONOSUPPORT:
 		return ERROR_INET_EPROTONOSUPPORT;
+	#ifdef ESOCKTNOSUPPORT
 	case ESOCKTNOSUPPORT:
 		return ERROR_INET_ESOCKTNOSUPPORT;
+	#endif
 	case EADDRNOTAVAIL:
 		return ERROR_INET_EADDRNOTAVAIL;
 	case EISCONN:

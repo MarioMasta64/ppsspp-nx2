@@ -106,6 +106,7 @@ const char *WindowSystemToString(WindowSystem winsys) {
 	case WINDOWSYSTEM_DISPLAY: return "DISPLAY";
 	case WINDOWSYSTEM_SDL: return "SDL";
 	case WINDOWSYSTEM_NONE: return "NONE";
+	case WINDOWSYSTEM_VI_NN: return "VI_NN";
 	default:
 		return "UNKNOWN";
 	}
@@ -153,6 +154,9 @@ VkResult VulkanContext::CreateInstance(const CreateInfo &info) {
 
 	// List extensions to try to enable.
 	instance_extensions_enabled_.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+#if defined(__SWITCH2__)
+	instance_extensions_enabled_.push_back(VK_NN_VI_SURFACE_EXTENSION_NAME);
+#endif
 #ifdef _WIN32
 	instance_extensions_enabled_.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif defined(__ANDROID__)
@@ -1088,6 +1092,18 @@ VkResult VulkanContext::CreateSurface(WindowSystem winsys, void *data1, void *da
 	VkResult retval = VK_SUCCESS;
 
 	switch (winsys) {
+#if defined(__SWITCH2__)
+	case WINDOWSYSTEM_VI_NN:
+	{
+		auto create = reinterpret_cast<PFN_vkCreateViSurfaceNN>(vkGetInstanceProcAddr(instance_, "vkCreateViSurfaceNN"));
+		if (!create)
+			return VK_ERROR_EXTENSION_NOT_PRESENT;
+		VkViSurfaceCreateInfoNN vi{VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN};
+		vi.window = data2;
+		retval = create(instance_, &vi, nullptr, surface);
+		break;
+	}
+#endif
 #ifdef _WIN32
 	case WINDOWSYSTEM_WIN32:
 	{

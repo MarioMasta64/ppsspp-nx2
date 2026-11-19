@@ -448,6 +448,16 @@ static u32 sceRtcIsLeapYear(u32 year)
 	return __RtcIsLeapYear(year) ? 1 : 0;
 }
 
+#if defined(__SWITCH2__)
+static int Switch2TimezoneOffset() {
+	TimeCalendarTime calendar{};
+	TimeCalendarAdditionalInfo info{};
+	if (R_SUCCEEDED(timeToCalendarTimeWithMyRule(static_cast<uint64_t>(::time(nullptr)), &calendar, &info)))
+		return info.offset;
+	return 0;
+}
+#endif
+
 static int sceRtcConvertLocalTimeToUTC(u32 tickLocalPtr,u32 tickUTCPtr)
 {
 	DEBUG_LOG(Log::sceRtc, "sceRtcConvertLocalTimeToUTC(%d, %d)", tickLocalPtr, tickUTCPtr);
@@ -455,7 +465,9 @@ static int sceRtcConvertLocalTimeToUTC(u32 tickLocalPtr,u32 tickUTCPtr)
 	{
 		u64 srcTick = Memory::ReadUnchecked_U64(tickLocalPtr);
 		// TODO : Let the user select his timezone / daylight saving instead of taking system param ?
-#ifdef _WIN32
+#if defined(__SWITCH2__)
+		srcTick -= Switch2TimezoneOffset() * 1000000ULL;
+#elif defined(_WIN32)
 		long timezone_val;
 		_get_timezone(&timezone_val);
 		srcTick -= -timezone_val * 1000000ULL;
@@ -479,7 +491,9 @@ static int sceRtcConvertUtcToLocalTime(u32 tickUTCPtr, u32 tickLocalPtr)
 	if (Memory::IsValidRange(tickLocalPtr, 8) && Memory::IsValidRange(tickUTCPtr, 8)) {
 		u64 srcTick = Memory::ReadUnchecked_U64(tickUTCPtr);
 		// TODO : Let the user select his timezone / daylight saving instead of taking system param ?
-#ifdef _WIN32
+#if defined(__SWITCH2__)
+		srcTick += Switch2TimezoneOffset() * 1000000ULL;
+#elif defined(_WIN32)
 		long timezone_val;
 		_get_timezone(&timezone_val);
 		srcTick += -timezone_val * 1000000ULL;
@@ -1072,8 +1086,10 @@ static int sceRtcFormatRFC2822LocalTime(u32 outPtr, u32 srcTickPtr)
 		return -1;
 	}
 
-	int tz_seconds;
-#ifdef _WIN32
+	int tz_seconds = 0;
+#if defined(__SWITCH2__)
+		tz_seconds = Switch2TimezoneOffset();
+#elif defined(_WIN32)
 		long timezone_val;
 		_get_timezone(&timezone_val);
 		tz_seconds = -timezone_val;
@@ -1109,8 +1125,10 @@ static int sceRtcFormatRFC3339LocalTime(u32 outPtr, u32 srcTickPtr)
 		return -1;
 	}
 
-	int tz_seconds;
-#ifdef _WIN32
+	int tz_seconds = 0;
+#if defined(__SWITCH2__)
+		tz_seconds = Switch2TimezoneOffset();
+#elif defined(_WIN32)
 		long timezone_val;
 		_get_timezone(&timezone_val);
 		tz_seconds = -timezone_val;

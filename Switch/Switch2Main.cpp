@@ -1,0 +1,295 @@
+// Copyright (c) 2012- PPSSPP Project.
+// This program is free software under the GNU GPL, version 2 or later.
+// See LICENSE.TXT for details.
+#include "Common/CommonTypes.h"
+#include <kaihen.h>
+#include <algorithm>
+#include <atomic>
+#include <cstdio>
+#include <cstring>
+#include <functional>
+#include <mutex>
+#include <string>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <vector>
+#include "Common/CPUDetect.h"
+#include "Common/File/FileUtil.h"
+#include "Common/File/VFS/VFS.h"
+#include "Common/File/VFS/DirectoryReader.h"
+#include "Common/GPU/Vulkan/VulkanGraphicsContext.h"
+#include "Common/GPU/Vulkan/VulkanContext.h"
+#include "Common/Input/InputState.h"
+#include "Common/Log.h"
+#include "Common/System/Display.h"
+#include "Common/System/NativeApp.h"
+#include "Common/System/Request.h"
+#include "Common/System/System.h"
+#include "Core/CmdLine.h"
+#include "Core/Config.h"
+#include "Core/ConfigValues.h"
+#include "Core/EmuThread.h"
+
+namespace {
+constexpr const char *DATA_PATH = "sdmc:/switch/ppsspp-switch2/";
+std::atomic<bool> quitRequested{false};
+uint32_t displayWidth = 1280;
+uint32_t displayHeight = 720;
+
+bool VerifyJit(std::string *error) {
+	Jit code{};
+	Result rc = jitCreate(&code, 0x1000);
+	if (R_FAILED(rc)) {
+		*error = "kaiHEN could not allocate executable JIT memory";
+		std::fprintf(stderr, "JIT allocation failed: %08x\n", rc);
+		return false;
+	}
+	const uint32_t instructions[] = {0x52800540, 0xD65F03C0}; // mov w0, #42; ret
+	memcpy(jitGetRwAddr(&code), instructions, sizeof(instructions));
+	const KaihenJitRange range{0, sizeof(instructions)};
+	rc = kaihenJitPublishRanges(&code, &range, 1);
+	bool passed = false;
+	if (R_SUCCEEDED(rc)) {
+		auto function = reinterpret_cast<int (*)()>(jitGetRxAddr(&code));
+		passed = function() == 42;
+	}
+	const Result closeResult = jitClose(&code);
+	std::fprintf(stderr, "JIT self-test: publish=%08x close=%08x result=%s\n", rc, closeResult, passed ? "pass" : "fail");
+	if (!passed)
+		*error = "kaiHEN JIT publication self-test failed. See boot.log.";
+	return passed;
+}
+
+struct NativeTimeService {
+	bool initialized = R_SUCCEEDED(timeInitialize());
+	~NativeTimeService() {
+		if (initialized)
+			timeExit();
+	}
+};
+
+void PollInput(PadState &pad) {
+	padUpdate(&pad);
+	const u64 down = padGetButtonsDown(&pad);
+	const u64 up = padGetButtonsUp(&pad);
+	struct Button { u64 native; InputKeyCode key; };
+	static constexpr Button buttons[] = {
+		{HidNpadButton_B, NKCODE_BUTTON_A}, {HidNpadButton_A, NKCODE_BUTTON_B},
+		{HidNpadButton_Y, NKCODE_BUTTON_X}, {HidNpadButton_X, NKCODE_BUTTON_Y},
+		{HidNpadButton_Up, NKCODE_DPAD_UP}, {HidNpadButton_Down, NKCODE_DPAD_DOWN},
+		{HidNpadButton_Left, NKCODE_DPAD_LEFT}, {HidNpadButton_Right, NKCODE_DPAD_RIGHT},
+		{HidNpadButton_L, NKCODE_BUTTON_L1}, {HidNpadButton_R, NKCODE_BUTTON_R1},
+		{HidNpadButton_Plus, NKCODE_BUTTON_START}, {HidNpadButton_Minus, NKCODE_BUTTON_SELECT},
+		{HidNpadButton_StickR, NKCODE_HOME},
+	};
+	for (const auto &button : buttons) {
+		if (down & button.native)
+			NativeKey(KeyInput(DEVICE_ID_XINPUT_0, button.key, KeyInputFlags::DOWN));
+		if (up & button.native)
+			NativeKey(KeyInput(DEVICE_ID_XINPUT_0, button.key, KeyInputFlags::UP));
+	}
+	const HidAnalogStickState left = padGetStickPos(&pad, 0);
+	const HidAnalogStickState right = padGetStickPos(&pad, 1);
+	const AxisInput axes[] = {
+		{DEVICE_ID_XINPUT_0, JOYSTICK_AXIS_X, std::clamp(left.x / 32767.0f, -1.0f, 1.0f)},
+		{DEVICE_ID_XINPUT_0, JOYSTICK_AXIS_Y, std::clamp(-left.y / 32767.0f, -1.0f, 1.0f)},
+		{DEVICE_ID_XINPUT_0, JOYSTICK_AXIS_Z, std::clamp(right.x / 32767.0f, -1.0f, 1.0f)},
+		{DEVICE_ID_XINPUT_0, JOYSTICK_AXIS_RZ, std::clamp(-right.y / 32767.0f, -1.0f, 1.0f)},
+		{DEVICE_ID_XINPUT_0, JOYSTICK_AXIS_LTRIGGER, (padGetButtons(&pad) & HidNpadButton_ZL) ? 1.0f : 0.0f},
+	};
+	NativeAxis(axes, std::size(axes));
+}
+
+int ShowStartupError(const std::string &error) {
+	consoleInit(nullptr);
+	std::printf("PPSSPP Switch 2\n\nStartup failed:\n%s\n\nPress Plus to exit.\n", error.c_str());
+	PadState pad;
+	padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+	padInitializeDefault(&pad);
+	while (appletMainLoop()) {
+		padUpdate(&pad);
+		if (padGetButtonsDown(&pad) & HidNpadButton_Plus)
+			break;
+		consoleUpdate(nullptr);
+	}
+	consoleExit(nullptr);
+	return 1;
+}
+}
+
+std::string System_GetProperty(SystemProperty prop) {
+	switch (prop) {
+	case SYSPROP_NAME: return "Nintendo Switch 2";
+	case SYSPROP_DEVICE_MODEL: return "Switch 2 (kaiHEN)";
+	case SYSPROP_LANGREGION: return "en_US";
+	case SYSPROP_CPUINFO: return cpu_info.Summarize();
+	default: return "";
+	}
+}
+std::vector<std::string> System_GetPropertyStringVec(SystemProperty prop) { return {}; }
+std::vector<std::string> System_GetCameraDeviceList() { return {}; }
+int64_t System_GetPropertyInt(SystemProperty prop) {
+	switch (prop) {
+	case SYSPROP_DEVICE_TYPE: return DEVICE_TYPE_TV;
+	case SYSPROP_DISPLAY_XRES: return displayWidth;
+	case SYSPROP_DISPLAY_YRES: return displayHeight;
+	case SYSPROP_DISPLAY_COUNT: return 1;
+	case SYSPROP_AUDIO_SAMPLE_RATE:
+	case SYSPROP_AUDIO_OPTIMAL_SAMPLE_RATE: return 48000;
+	case SYSPROP_AUDIO_FRAMES_PER_BUFFER:
+	case SYSPROP_AUDIO_OPTIMAL_FRAMES_PER_BUFFER: return 512;
+	default: return -1;
+	}
+}
+float System_GetPropertyFloat(SystemProperty prop) {
+	switch (prop) {
+	case SYSPROP_DISPLAY_REFRESH_RATE: return 60.0f;
+	case SYSPROP_DISPLAY_DPI: return 96.0f;
+	case SYSPROP_DISPLAY_SAFE_INSET_LEFT:
+	case SYSPROP_DISPLAY_SAFE_INSET_RIGHT:
+	case SYSPROP_DISPLAY_SAFE_INSET_TOP:
+	case SYSPROP_DISPLAY_SAFE_INSET_BOTTOM: return 0.0f;
+	default: return -1.0f;
+	}
+}
+bool System_GetPropertyBool(SystemProperty prop) {
+	switch (prop) {
+	case SYSPROP_CAN_JIT:
+	case SYSPROP_HAS_BACK_BUTTON:
+	case SYSPROP_HAS_TEXT_INPUT_DIALOG:
+	case SYSPROP_KEYBOARD_IS_SOFT:
+	case SYSPROP_CAN_GET_FREE_SPACE_FAST: return true;
+	default: return false;
+	}
+}
+void System_Toast(std::string_view text) { std::fprintf(stderr, "%.*s\n", static_cast<int>(text.size()), text.data()); }
+void System_ShowKeyboard() {}
+void System_Vibrate(int length_ms) {}
+void System_LaunchUrl(LaunchUrlType type, std::string_view url) {}
+void System_Notify(SystemNotification notification) {}
+void System_AskForPermission(SystemPermission permission) {}
+PermissionStatus System_GetPermissionStatus(SystemPermission permission) { return PERMISSION_STATUS_GRANTED; }
+bool System_MakeRequest(SystemRequestType type, int requestId, const std::string &param1, const std::string &param2, int64_t param3, int64_t param4) {
+	switch (type) {
+	case SystemRequestType::EXIT_APP:
+	case SystemRequestType::RESTART_APP:
+		quitRequested = true;
+		return true;
+	case SystemRequestType::INPUT_TEXT_MODAL:
+		System_RunOnMainThread([=] {
+			SwkbdConfig keyboard{};
+			Result rc = swkbdCreate(&keyboard, 0);
+			if (R_FAILED(rc)) {
+				g_requestManager.PostSystemFailure(requestId);
+				return;
+			}
+			swkbdConfigMakePresetDefault(&keyboard);
+			swkbdConfigSetHeaderText(&keyboard, param1.c_str());
+			swkbdConfigSetInitialText(&keyboard, param2.c_str());
+			if (param3)
+				swkbdConfigSetPasswordFlag(&keyboard, 1);
+			char text[1024]{};
+			rc = swkbdShow(&keyboard, text, sizeof(text));
+			swkbdClose(&keyboard);
+			if (R_SUCCEEDED(rc))
+				g_requestManager.PostSystemSuccess(requestId, text);
+			else
+				g_requestManager.PostSystemFailure(requestId);
+		});
+		return true;
+	case SystemRequestType::SET_WINDOW_TITLE:
+	case SystemRequestType::SET_KEEP_SCREEN_BRIGHT:
+	case SystemRequestType::APPLY_FULLSCREEN_STATE:
+		return true;
+	default:
+		return false;
+	}
+}
+
+int main(int argc, char *argv[]) {
+	mkdir("sdmc:/switch", 0777);
+	mkdir(DATA_PATH, 0777);
+	chdir(DATA_PATH);
+	std::freopen("boot.log", "w", stderr);
+	setvbuf(stderr, nullptr, _IONBF, 0);
+	std::fprintf(stderr, "PPSSPP Switch 2 startup\n");
+	Result rc = romfsInit();
+	if (R_FAILED(rc))
+		return ShowStartupError("Could not mount embedded assets");
+	std::string jitError;
+	if (!VerifyJit(&jitError)) {
+		romfsExit();
+		return ShowStartupError(jitError);
+	}
+	uint64_t coreMask = 0;
+	if (R_SUCCEEDED(svcGetInfo(&coreMask, InfoType_CoreMask, CUR_PROCESS_HANDLE, 0)))
+		cpu_info.num_cores = std::max(1, __builtin_popcountll(coreMask));
+	std::fprintf(stderr, "Application core mask: %llx (%d cores)\n", static_cast<unsigned long long>(coreMask), cpu_info.num_cores);
+	NativeTimeService timeService;
+	const bool socketsReady = R_SUCCEEDED(socketInitializeDefault());
+	g_VFS.Register("", new DirectoryReader(Path("romfs:/")));
+	CommandLineOptions options;
+	const auto parsed = options.Parse(argc, const_cast<const char **>(argv));
+	if (parsed != CommandLineParseResult::Continue) {
+		if (socketsReady)
+			socketExit();
+		romfsExit();
+		return parsed == CommandLineParseResult::Exit ? 0 : 1;
+	}
+	if (!options.log.has_value())
+		options.log = std::string(DATA_PATH) + "ppsspp.log";
+	options.gpuBackend = GPUBackend::VULKAN;
+	NativeInit(argc, const_cast<const char **>(argv), options, DATA_PATH, "sdmc:/", DATA_PATH);
+	if (g_Config.bFirstRun)
+		g_Config.iInternalResolution = 1;
+	g_Config.bShowTouchControls = false;
+	g_Config.bFastMemory = false;
+	g_Config.iGPUBackend = static_cast<int>(GPUBackend::VULKAN);
+	if (g_Config.currentDirectory == Path("/"))
+		g_Config.currentDirectory = Path("sdmc:/");
+	// Fixed 720p/60 presentation for the first device qualification.
+	nwindowSetModeDimensions(nwindowGetDefault(), 1280, 720, 1280, 720);
+	nwindowSetFrameRates(nwindowGetDefault(), 60, 60, false);
+	nwindowGetDimensions(nwindowGetDefault(), &displayWidth, &displayHeight);
+	std::fprintf(stderr, "Display: %ux%u\n", displayWidth, displayHeight);
+	VulkanGraphicsContext graphics;
+	std::string error;
+	bool apiReady = graphics.InitAPI(nullptr, &g_Config.sVulkanDevice, &error);
+	if (apiReady) {
+		auto *vulkan = static_cast<VulkanContext *>(graphics.GetAPIContext());
+		vulkan->SetCbGetDrawSize([] {
+			uint32_t width = displayWidth, height = displayHeight;
+			nwindowGetDimensions(nwindowGetDefault(), &width, &height);
+			return VkExtent2D{width, height};
+		});
+	}
+	bool surfaceReady = apiReady && graphics.InitSurface(WINDOWSYSTEM_VI_NN, nullptr, nwindowGetDefault(), &error);
+	if (!surfaceReady) {
+		if (apiReady)
+			graphics.ShutdownAPI();
+		NativeShutdown();
+		if (socketsReady)
+			socketExit();
+		romfsExit();
+		return ShowStartupError(error);
+	}
+	Native_UpdateScreenScale(displayWidth, displayHeight, 1.0f);
+	NativeResized();
+	PadState pad;
+	padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+	padInitializeDefault(&pad);
+	RunMainLoop(&graphics, new NativeApplication(), [&](GraphicsContext *context) {
+		if (quitRequested || !appletMainLoop())
+			return false;
+		PollInput(pad);
+		NativeFrame(context);
+		return !quitRequested;
+	});
+	graphics.ShutdownSurface();
+	graphics.ShutdownAPI();
+	NativeShutdown();
+	if (socketsReady)
+		socketExit();
+	romfsExit();
+	return 0;
+}

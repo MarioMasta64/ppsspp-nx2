@@ -799,7 +799,7 @@ void RestoreDefault() {
 		return;
 	}
 
-#if PPSSPP_PLATFORM(WINDOWS)
+#if PPSSPP_PLATFORM(WINDOWS) || defined(__SWITCH2__)
 	SetDefaultKeyMap(DEFAULT_MAPPING_KEYBOARD, true);
 	SetDefaultKeyMap(DEFAULT_MAPPING_XINPUT, false);
 	SetDefaultKeyMap(DEFAULT_MAPPING_PAD, false);

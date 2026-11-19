@@ -14,6 +14,9 @@
 #include <cstring>
 
 #include "Common/Arm64Emitter.h"
+#if defined(__SWITCH2__)
+#include "Switch/Switch2Jit.h"
+#endif
 #include "Common/Math/math_util.h"
 #include "Common/CommonTypes.h"
 #include "Common/CommonWindows.h"
@@ -332,7 +335,9 @@ void ARM64XEmitter::FlushIcacheSection(const u8 *start, const u8 *end) {
 
 void ARM64XEmitter::FlushIcacheSections(const u8 *const *starts, const u8 *const *ends, int count)
 {
-#if PPSSPP_PLATFORM(IOS) || PPSSPP_PLATFORM(MAC)
+#if defined(__SWITCH2__)
+	Switch2JitPublish(starts, ends, count);
+#elif PPSSPP_PLATFORM(IOS) || PPSSPP_PLATFORM(MAC)
 	// Header file says this is equivalent to: sys_icache_invalidate(start, end - start);
 	for (int i = 0; i < count; i++)
 		sys_cache_control(kCacheFunctionPrepareForExecution, (void *)starts[i], ends[i] - starts[i]);

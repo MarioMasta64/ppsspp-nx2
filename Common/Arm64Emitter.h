@@ -14,6 +14,10 @@
 
 #define DYNA_REC JIT
 
+#ifdef BIT
+#undef BIT
+#endif
+
 #ifdef FMAX
 #undef FMAX
 #endif

@@ -16,7 +16,9 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#if !defined(__SWITCH2__)
 #include <sys/mman.h>
+#endif
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -35,7 +37,7 @@
 #define __BSD_VISIBLE 1
 #define TCP_MAXSEG 2
 #include <netdb.h>
-#include <switch.h>
+#include "Common/CommonTypes.h"
 // Missing include, *shrugs*
 extern "C" struct hostent *gethostbyname(const char *name);
 #endif // defined(HAVE_LIBNX) || PPSSPP_PLATFORM(SWITCH)

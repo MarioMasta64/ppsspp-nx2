@@ -152,3 +152,8 @@ RAPrefs_PPSSPP.cfg
 cmake-build-*/
 
 /.vscode/
+
+# Native Switch 2 output
+/build-switch2/
+/build-host/
+/dist-switch2/

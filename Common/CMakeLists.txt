@@ -377,6 +377,8 @@ add_library(Common STATIC
 	MemArena.h
 	MemoryUtil.cpp
 	MemoryUtilHorizon.cpp
+	../Switch/Switch2Jit.cpp
+	../Switch/Switch2VulkanLoader.cpp
 	MemoryUtil.h
 	MsgHandler.h
 	OSVersion.cpp
@@ -450,3 +452,9 @@ endif()
 # was only linked to the old combined "core" target, which happened to always be linked after
 # Common everywhere it mattered).
 target_link_libraries(Common ${GlslangLibs})
+
+if(NINTENDO_SWITCH2)
+	target_link_libraries(Common vulkan nx)
+	# newlib exposes vasprintf only with GNU feature declarations.
+	set_source_files_properties(StringUtils.cpp PROPERTIES COMPILE_DEFINITIONS _GNU_SOURCE)
+endif()

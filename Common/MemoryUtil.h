@@ -21,7 +21,7 @@
 #ifndef __SWITCH__
 #include <sys/mman.h>
 #else
-#include <switch.h>
+#include "Common/CommonTypes.h"
 #endif // !__SWITCH__
 #endif
 #include <stdint.h>

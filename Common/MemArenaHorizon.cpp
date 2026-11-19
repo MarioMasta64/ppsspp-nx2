@@ -21,6 +21,33 @@
 
 #include "Common/MemArena.h"
 
+#if defined(__SWITCH2__)
+// kaiHEN does not grant the process-memory alias SVCs used by the Switch 1 arena.
+// Use PPSSPP's NO_MMAP address masking with an owned 256 MiB allocation.
+size_t MemArena::roundup(size_t x) { return (x + 0xFFF) & ~size_t(0xFFF); }
+bool MemArena::NeedsProbing() { return false; }
+bool MemArena::GrabMemSpace(size_t size) { return true; }
+void MemArena::ReleaseSpace() {
+	free(reserved_mem);
+	reserved_mem = nullptr;
+	reserved_size = 0;
+}
+void *MemArena::CreateView(s64 offset, size_t size, void *base) {
+	const uintptr_t first = reinterpret_cast<uintptr_t>(reserved_mem);
+	const uintptr_t address = reinterpret_cast<uintptr_t>(base);
+	if (!reserved_mem || address < first || size > reserved_size || address - first > reserved_size - size)
+		return nullptr;
+	return base;
+}
+void MemArena::ReleaseView(s64 offset, void *view, size_t size) {}
+u8 *MemArena::Find4GBBase() {
+	if (!reserved_mem) {
+		reserved_size = 0x10000000;
+		reserved_mem = memalign(0x1000, reserved_size);
+	}
+	return static_cast<u8 *>(reserved_mem);
+}
+#else
 static uintptr_t memoryBase = 0;
 static uintptr_t memoryCodeBase = 0;
 static uintptr_t memorySrcBase = 0;
@@ -82,4 +109,5 @@ u8 *MemArena::Find4GBBase() {
 	return (u8 *)memoryBase;
 }
 
+#endif // __SWITCH2__
 #endif // PPSSPP_PLATFORM(SWITCH)

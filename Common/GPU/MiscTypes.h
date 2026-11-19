@@ -18,6 +18,7 @@ enum WindowSystem {
 	WINDOWSYSTEM_DISPLAY,
 	WINDOWSYSTEM_SDL,
 	WINDOWSYSTEM_NONE,
+	WINDOWSYSTEM_VI_NN,
 };
 
 // Flags and structs shared between backends that haven't found a good home.

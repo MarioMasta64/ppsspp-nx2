@@ -297,6 +297,11 @@ void CPUInfo::Detect()
 	SYSTEM_INFO sysInfo;
 	GetSystemInfo(&sysInfo);
 	num_cores = sysInfo.dwNumberOfProcessors;
+#elif defined(__SWITCH2__)
+	strcpy(brand_string, "Nintendo Switch 2 ARM64");
+	num_cores = 6;
+	isVFP3 = true;
+	isVFP4 = true;
 #else // !PPSSPP_PLATFORM(IOS) && !PPSSPP_PLATFORM(MAC) && !PPSSPP_PLATFORM(WINDOWS)
 	strcpy(brand_string, "Unknown");
 	num_cores = 1;

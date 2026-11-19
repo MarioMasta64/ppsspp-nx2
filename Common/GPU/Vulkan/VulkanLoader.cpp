@@ -248,10 +248,17 @@ PFN_vkGetRefreshCycleDurationGOOGLE vkGetRefreshCycleDurationGOOGLE;
 
 using namespace PPSSPP_VK;
 
+#if defined(__SWITCH2__)
+PFN_vkVoidFunction Switch2VulkanSymbol(const char *name);
+#endif
 #if PPSSPP_PLATFORM(SWITCH)
 typedef void *VulkanLibraryHandle;
 static VulkanLibraryHandle vulkanLibrary;
+#if defined(__SWITCH2__)
+#define dlsym(x, y) Switch2VulkanSymbol(y)
+#else
 #define dlsym(x, y) nullptr
+#endif
 #elif PPSSPP_PLATFORM(WINDOWS)
 typedef HINSTANCE VulkanLibraryHandle;
 static VulkanLibraryHandle vulkanLibrary;
@@ -375,7 +382,9 @@ static void ForgetCustomDriver() {
 }
 
 static VulkanLibraryHandle VulkanLoadLibrary(std::string *errorString) {
-#if PPSSPP_PLATFORM(SWITCH)
+#if defined(__SWITCH2__)
+	return reinterpret_cast<void *>(1);
+#elif PPSSPP_PLATFORM(SWITCH)
 	// Always unavailable, for now.
 	return nullptr;
 #elif PPSSPP_PLATFORM(UWP)

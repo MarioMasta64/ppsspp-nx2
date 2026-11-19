@@ -13,6 +13,9 @@
 #if PPSSPP_PLATFORM(SWITCH)
 #include <cstdio>
 #include <switch.h>
+#if defined(__SWITCH2__)
+#include "Switch/Switch2Jit.h"
+#endif
 #endif // PPSSPP_PLATFORM(SWITCH)
 
 // Everything that needs to generate code should inherit from this.
@@ -76,9 +79,15 @@ public:
 		region_size = size;
 #if PPSSPP_PLATFORM(SWITCH)
 		Result rc = jitCreate(&jitController, size);
-		if(R_FAILED(rc)) {
+		if (R_FAILED(rc)) {
 			printf("Failed to create Jitbuffer of size 0x%x err: 0x%x\n", size, rc);
+#if defined(__SWITCH2__)
+			fatalThrow(rc);
+#endif
 		}
+#if defined(__SWITCH2__)
+		Switch2JitRegister(&jitController);
+#endif
 		printf("[NXJIT]: Initialized RX: %p RW: %p\n", jitController.rx_addr, jitController.rw_addr);
 
 		region = (u8 *)jitController.rx_addr;
@@ -159,6 +168,9 @@ public:
 		ProtectMemoryPages(region, region_size, MEM_PROT_READ | MEM_PROT_WRITE);
 		FreeExecutableMemory(region, region_size);
 #else // !PPSSPP_PLATFORM(SWITCH)
+#if defined(__SWITCH2__)
+		Switch2JitUnregister(&jitController);
+#endif
 		jitClose(&jitController);
 		printf("[NXJIT]: Jit closed\n");
 #endif // PPSSPP_PLATFORM(SWITCH)

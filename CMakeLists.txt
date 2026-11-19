@@ -1,6 +1,10 @@
 # vim:noexpandtab:
 cmake_minimum_required(VERSION 3.16)
 project(PPSSPP)
+
+if(NINTENDO_SWITCH2)
+	include(Switch/Switch2.cmake)
+endif()
 enable_testing()
 
 #This is supposed to work but doesn't!
@@ -349,7 +353,7 @@ set(SDL_LIB_TARGET "")
 set(SDL_TTF_LIB_TARGET "")
 set(FONTCONFIG_LIB_TARGET "")
 
-if(NOT LIBRETRO AND NOT IOS AND NOT HEADLESS_CROSS AND NOT ANDROID)
+if(NOT LIBRETRO AND NOT IOS AND NOT HEADLESS_CROSS AND NOT ANDROID AND NOT NINTENDO_SWITCH2)
 	find_package(SDL3 QUIET)
 	if(NOT SDL3_FOUND)
 		if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND (EXISTS "/usr/bin/apt" OR EXISTS "/usr/bin/apt-get" OR EXISTS "/etc/debian_version"))
@@ -892,7 +896,11 @@ if(IOS OR MACOSX)
 		Common/Render/Text/draw_text_cocoa.h)
 endif()
 
-if(ANDROID)
+if(NINTENDO_SWITCH2)
+	set(TargetBin PPSSPPSwitch2)
+	list(APPEND targetExtra Switch/Switch2Main.cpp Switch/Switch2Audio.cpp)
+	list(APPEND targetExtraLibs kaihen nx)
+elseif(ANDROID)
 	list(APPEND AndroidJniSource
 		android/jni/app-android.cpp
 		android/jni/AndroidAudio.cpp
@@ -1550,6 +1558,24 @@ if(TargetBin)
 	elseif(${CMAKE_SYSTEM_NAME} MATCHES "^(DragonFly|FreeBSD|NetBSD)$")
 		target_link_libraries(${TargetBin} execinfo)
 	endif()
+endif()
+
+if(NINTENDO_SWITCH2)
+	nx_generate_nacp("${CMAKE_BINARY_DIR}/ppsspp-switch2.nacp" NAME "PPSSPP Switch 2" AUTHOR "PPSSPP contributors" VERSION "0.1.0")
+	find_package(Python3 COMPONENTS Interpreter REQUIRED)
+	file(GLOB_RECURSE SWITCH2_RUNTIME_ASSETS CONFIGURE_DEPENDS LIST_DIRECTORIES false "${CMAKE_SOURCE_DIR}/assets/*")
+	list(FILTER SWITCH2_RUNTIME_ASSETS EXCLUDE REGEX "/[.]git$")
+	set(SWITCH2_ASSET_STAMP "${CMAKE_BINARY_DIR}/switch2-assets.stamp")
+	add_custom_command(OUTPUT "${SWITCH2_ASSET_STAMP}"
+		COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Tools/stage-switch2-assets.py" "${CMAKE_BINARY_DIR}/romfs-switch2"
+		COMMAND "${CMAKE_COMMAND}" -E touch "${SWITCH2_ASSET_STAMP}"
+		DEPENDS ${SWITCH2_RUNTIME_ASSETS} "${CMAKE_SOURCE_DIR}/Tools/stage-switch2-assets.py"
+		VERBATIM)
+	add_custom_target(PPSSPPSwitch2Assets DEPENDS "${SWITCH2_ASSET_STAMP}")
+	set_target_properties(PPSSPPSwitch2Assets PROPERTIES
+		DKP_ASSET_FOLDER "${CMAKE_BINARY_DIR}/romfs-switch2"
+		DKP_ASSET_FILES "${SWITCH2_RUNTIME_ASSETS};${SWITCH2_ASSET_STAMP}")
+	nx_create_nro(${TargetBin} NACP "${CMAKE_BINARY_DIR}/ppsspp-switch2.nacp" ROMFS PPSSPPSwitch2Assets)
 endif()
 
 # installs

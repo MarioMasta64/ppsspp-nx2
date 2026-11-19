@@ -133,7 +133,7 @@
 #else
 #define PPSSPP_API_ANY_GL 1
 #endif
-#elif PPSSPP_PLATFORM(IOS) && !defined(__LIBRETRO__)
+#elif (PPSSPP_PLATFORM(IOS) && !defined(__LIBRETRO__)) || defined(__SWITCH2__)
 // No GL
 #else
 // All other platforms support GL.

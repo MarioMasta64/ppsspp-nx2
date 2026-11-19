@@ -6,6 +6,7 @@
 #include "Core/MemMap.h"
 
 // Sol is expensive to include so we only do it here.
+#include "Switch/Switch2Limits.h"
 #include "ext/sol/sol.hpp"
 
 LuaContext g_lua;

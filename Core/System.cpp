@@ -30,6 +30,7 @@
 
 #include <mutex>
 
+#include "Switch/Switch2Limits.h"
 #include "ext/lua/lapi.h"
 
 #include "Common/System/System.h"
