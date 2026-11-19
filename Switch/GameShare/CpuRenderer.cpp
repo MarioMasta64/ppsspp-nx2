@@ -19,8 +19,56 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <mutex>
+
+extern "C" Result __real_gsvGpuCreateSlotEvent(GsvGpu *, uint32_t, _Event *, bool);
+extern "C" Result __real_gsvGpuOpenWorker(GsvGpu *, uint32_t, _Event *);
+extern "C" void __real_gsvGpuClose(GsvGpu *);
 
 namespace {
+std::mutex driverGpuMutex;
+GsvGpu *driverGpu = nullptr;
+uint64_t driverSlots = 0;
+uint64_t guestSlot = 0;
+bool driverGpuReady = false;
+
+constexpr uint32_t TRACKED_SLOTS = 64;
+constexpr uint64_t SlotBit(uint32_t slot) {
+	return slot < TRACKED_SLOTS ? uint64_t{1} << slot : 0;
+}
+
+Result BorrowDriverGpu(GsvGpu *gpu, uint32_t *slot, _Event *event) {
+	std::lock_guard<std::mutex> lock(driverGpuMutex);
+	if (!driverGpuReady || guestSlot) {
+		return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
+	}
+	uint32_t first = 0, last = 0;
+	Result rc = gsvGpuGetSlotRange(driverGpu, &first, &last);
+	if (R_FAILED(rc)) {
+		return rc;
+	}
+	last = std::min(last, TRACKED_SLOTS - 1);
+	for (uint32_t candidate = first; candidate <= last; ++candidate) {
+		if (driverSlots & SlotBit(candidate)) {
+			continue;
+		}
+		rc = __real_gsvGpuCreateSlotEvent(driverGpu, candidate, event, false);
+		if (R_SUCCEEDED(rc)) {
+			*gpu = *driverGpu;
+			*slot = candidate;
+			guestSlot = SlotBit(candidate);
+		}
+		return rc;
+	}
+	return MAKERESULT(Module_Libnx, LibnxError_BadInput);
+}
+
+void ReleaseGuestSlot(_Event *event) {
+	std::lock_guard<std::mutex> lock(driverGpuMutex);
+	eventClose(event);
+	guestSlot = 0;
+}
+
 constexpr uint32_t WIDTH = 1280, HEIGHT = 720, PITCH = WIDTH * 4;
 constexpr size_t IMAGE_SIZE = PITCH * 768;
 constexpr uint64_t WAIT_NS = 2000000000ULL;
@@ -33,17 +81,58 @@ bool Empty(const Vi2Dependency &dependency) {
 	return !token && !dependency.data[4] && !value;
 }
 }
+
+extern "C" {
+Result __wrap_gsvGpuCreateSlotEvent(GsvGpu *gpu, uint32_t slot, _Event *event, bool autoclear) {
+	std::lock_guard<std::mutex> lock(driverGpuMutex);
+	if (driverGpu == gpu && (guestSlot & SlotBit(slot))) {
+		return BadInput();
+	}
+	const Result rc = __real_gsvGpuCreateSlotEvent(gpu, slot, event, autoclear);
+	if (R_SUCCEEDED(rc) && (!driverGpu || driverGpu == gpu)) {
+		driverGpu = gpu;
+		driverSlots |= SlotBit(slot);
+	}
+	return rc;
+}
+
+Result __wrap_gsvGpuOpenWorker(GsvGpu *gpu, uint32_t slot, _Event *event) {
+	const Result rc = __real_gsvGpuOpenWorker(gpu, slot, event);
+	if (R_SUCCEEDED(rc)) {
+		std::lock_guard<std::mutex> lock(driverGpuMutex);
+		if (!driverGpu || driverGpu == gpu) {
+			driverGpu = gpu;
+			driverSlots |= SlotBit(slot);
+			driverGpuReady = true;
+		}
+	}
+	return rc;
+}
+
+void __wrap_gsvGpuClose(GsvGpu *gpu) {
+	{
+		std::lock_guard<std::mutex> lock(driverGpuMutex);
+		if (driverGpu == gpu) {
+			driverGpu = nullptr;
+			driverGpuReady = false;
+			driverSlots = 0;
+		}
+	}
+	__real_gsvGpuClose(gpu);
+}
+}
+
 struct Switch2GuestCpuRenderer::Impl {
 	Vi2Layer *layer = nullptr;
 	GsvSync sync{};
 	GsvGpu gpu{};
 	_Event event{};
-	bool gsv = false, nv = false, syncOpen = false, gpuOpen = false;
-	bool eventOpen = false, clientOpen = false, addressSpaceOpen = false;
+	bool gsv = false, syncOpen = false;
+	bool eventOpen = false, clientOpen = false;
 	bool attribute = false, range = false, rangePending = false;
 	bool presented = false, unregistered = false, ready = false;
 	uint8_t client = 0;
-	uint32_t addressSpace = 0, rangeId = 0, next = 0;
+	uint32_t slot = 0, rangeId = 0, next = 0;
 	uint8_t *backing = nullptr;
 	Result quarantine = 0;
 	struct Image {
@@ -123,28 +212,12 @@ uint32_t Switch2GuestCpuRenderer::Open(Vi2Layer *layer) {
 	s.layer = layer;
 #define OPEN_STEP(stage, call, owned) do { Result rc = (call); if (R_FAILED(rc)) { return s.Fail(stage, rc); } owned = true; } while (false)
 	OPEN_STEP("root", gsvInitialize(), s.gsv);
-	OPEN_STEP("nv", nvInitialize(), s.nv);
 	OPEN_STEP("sync", gsvOpenSync(&s.sync), s.syncOpen);
-	// OunceVK already registered the process frame mode. Do not repeat that
-	// root setup while its default display is presenting.
+	// OunceVK owns the registered VM, main session and worker. The host
+	// retires the guest renderer before either Vulkan context shuts down.
+	OPEN_STEP("borrow GPU and worker event", BorrowDriverGpu(&s.gpu, &s.slot, &s.event), s.eventOpen);
 	Result rc = 0;
-	OPEN_STEP("GPU", gsvOpenGpu(&s.gpu), s.gpuOpen);
-	OPEN_STEP("worker event", gsvGpuCreateSlotEvent(&s.gpu, 0, &s.event, false), s.eventOpen);
-	rc = gsvGpuOpenWorker(&s.gpu, 0, &s.event);
-	if (R_FAILED(rc)) { return s.Fail("worker", rc); }
 	OPEN_STEP("client", gsvGpuRegisterClient(&s.gpu, 0x0050535050534747ULL, &s.client), s.clientOpen);
-	uint32_t vm = 0, userCount = 0;
-	GsvGpuVaRange user[4]{}, supervisor{};
-	rc = gsvGpuCreateVm(&s.gpu, &vm);
-	if (R_SUCCEEDED(rc)) { rc = gsvGpuGetVmUserRanges(&s.gpu, vm, user, &userCount); }
-	if (R_SUCCEEDED(rc)) { rc = gsvGpuGetVmGsvRange(&s.gpu, vm, &supervisor); }
-	if (R_SUCCEEDED(rc)) { rc = gsvRegisterVm(vm); }
-	if (R_FAILED(rc)) { return s.Fail("VM registration", rc); }
-	OPEN_STEP("address space", nvOpen(&s.addressSpace, "/dev/nvhost-as-gpu"), s.addressSpaceOpen);
-	struct { uint32_t version, vm; uint64_t reserved, first, end, reserved2; } import{5, vm, 0, 0x08000000ULL, 0xc000000000ULL, 0};
-	static_assert(sizeof(import) == 40);
-	rc = nvIoctl(s.addressSpace, 0x40284109, &import);
-	if (R_FAILED(rc)) { return s.Fail("address-space import", rc); }
 	GsvImageLayout layout;
 	gsvMakeImageLayout(&layout, WIDTH, HEIGHT, 7, PITCH / 64, 1, 1, 0);
 	uint64_t size = 0;
@@ -171,7 +244,7 @@ uint32_t Switch2GuestCpuRenderer::Open(Vi2Layer *layer) {
 	}
 #undef OPEN_STEP
 	s.ready = true;
-	std::fprintf(stderr, "GameShare guest image ready: 1280x720, separate VI2 layer\n");
+	std::fprintf(stderr, "GameShare guest image ready: 1280x720, separate VI2 layer, worker slot %u\n", s.slot);
 	return 0;
 }
 uint32_t Switch2GuestCpuRenderer::Present(const uint8_t *pixels, uint32_t width, uint32_t height, size_t stride) {
@@ -253,7 +326,7 @@ uint32_t Switch2GuestCpuRenderer::Retire() {
 	if (s.range) {
 		if (!s.rangePending) {
 			Result rc = eventClear(&s.event);
-			if (R_SUCCEEDED(rc)) { rc = gsvGpuUnregisterMemory(&s.gpu, s.rangeId, 0); }
+			if (R_SUCCEEDED(rc)) { rc = gsvGpuUnregisterMemory(&s.gpu, s.rangeId, s.slot); }
 			if (R_FAILED(rc)) { return s.quarantine = rc; }
 			s.rangePending = true;
 		}
@@ -269,16 +342,13 @@ uint32_t Switch2GuestCpuRenderer::Retire() {
 	}
 	free(s.backing);
 	s.backing = nullptr;
-	if (s.addressSpaceOpen) { nvClose(s.addressSpace); s.addressSpaceOpen = false; }
 	if (s.clientOpen) {
 		Result rc = gsvGpuReleaseClient(&s.gpu, s.client);
 		if (R_FAILED(rc)) { return s.quarantine = rc; }
 		s.clientOpen = false;
 	}
-	if (s.eventOpen) { eventClose(&s.event); s.eventOpen = false; }
-	if (s.gpuOpen) { gsvGpuClose(&s.gpu); s.gpuOpen = false; }
+	if (s.eventOpen) { ReleaseGuestSlot(&s.event); s.eventOpen = false; }
 	if (s.syncOpen) { gsvSyncClose(&s.sync); s.syncOpen = false; }
-	if (s.nv) { nvExit(); s.nv = false; }
 	if (s.gsv) { gsvExit(); s.gsv = false; }
 	return 0;
 }

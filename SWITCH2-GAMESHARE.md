@@ -59,11 +59,13 @@ This first route adds CPU readback/swizzle cost; zero-copy is not claimed.
 The GameShare SDK is vendored from Moonlight-Switch's research worktree.
 `Switch/GameShare/sdk-provenance.json` records the source revision and file
 hashes. Its MIT license and per-file ISC notices are retained. The SDK's pinned
-CPU-console uploader is disabled: this renderer owns its GSV GPU client,
-address-space import, backing and native image registrations using current
-public libounce APIs, without casting the host's default window or relying on
-its private ABI. Coexistence of these native resources with two Vulkan contexts
-requires physical qualification.
+CPU-console uploader is disabled. The guest renderer borrows the statically
+linked OunceVK driver's GSV main and worker sessions and uses its registered VM.
+It owns the guest image backing, registrations, client and completion event.
+The adapter tracks the driver's occupied slots at the libounce call boundary
+and reserves a free slot for guest range retirement. It does not access
+OunceVK's internal structs. Retire the guest images before Vulkan teardown.
+Coexistence and reuse on hardware still require qualification.
 
 The SDK owns matchmaking, native hosting, controller reads and the separate
 VI2 display/layer. Renderer retirement runs before native Finalize; layer
@@ -155,3 +157,11 @@ the linker to discard the host copy. The build now renames and checks all 7,351
 guest COMDAT groups in addition to the global symbol audit. Disassembly of the
 corrected ELF confirms that host startup calls its own string constructor and
 the guest constructor has a distinct address.
+
+The console opened the corrected build and started a host game. On the first
+GameShare attempt, VI2 reached the renderer hook, where a second GSV GPU open
+failed with `0x200F3`. The guest emulator independently reached offscreen
+Vulkan initialization. The revised uploader uses the existing driver session.
+The host also joins the SDK thread after terminal states before asking if
+native resources were retained, so a completed thread alone no longer forces a
+title restart. Confirm pairing, guest frames and stop/restart on hardware.

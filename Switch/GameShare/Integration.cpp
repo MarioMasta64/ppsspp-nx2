@@ -214,8 +214,12 @@ struct Session {
 			}
 		}
 		if (presenter.joinable() && presenterDone) { presenter.join(); }
-		if ((state == gameshare::Host::State::Idle || state == gameshare::Host::State::Failed) && !host->canUnload()) {
-			quarantined = true;
+		if (state == gameshare::Host::State::Idle || state == gameshare::Host::State::Failed) {
+			// Idle/Failed is published after SDK cleanup, but its thread still needs joining.
+			host->stopAndWait();
+			if (!host->canUnload()) {
+				quarantined = true;
+			}
 		}
 	}
 	bool PrepareExit() {
@@ -234,8 +238,8 @@ struct Session {
 		if (host) {
 			const auto state = host->state();
 			if (state != gameshare::Host::State::Idle && state != gameshare::Host::State::Failed) { return false; }
-			if (!host->canUnload()) { quarantined = true; return false; }
 			host->stopAndWait();
+			if (!host->canUnload()) { quarantined = true; return false; }
 		}
 		const int guest = ppsspp_guest_state();
 		if (guest == 1 || guest == 2 || guest == 4 || !presenterDone) { return false; }

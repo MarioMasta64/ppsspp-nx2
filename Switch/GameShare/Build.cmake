@@ -41,6 +41,8 @@ add_custom_command(OUTPUT "${guest_object}"
 	COMMAND_EXPAND_LISTS VERBATIM)
 set_source_files_properties("${guest_object}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
 target_sources(${TargetBin} PRIVATE "${guest_object}")
+# The Vulkan driver is linked statically and owns the process's GSV sessions.
+target_link_options(${TargetBin} PRIVATE "-Wl,--wrap=gsvGpuCreateSlotEvent,--wrap=gsvGpuOpenWorker,--wrap=gsvGpuClose")
 add_library(PPSSPPSwitch2GameShareBridge STATIC Switch/GameShare/Integration.cpp Switch/GameShare/CpuRenderer.cpp)
 set(GAMESHARE_ENABLE_CPU_STREAMER OFF CACHE BOOL "" FORCE)
 add_subdirectory(Switch/GameShare/sdk)

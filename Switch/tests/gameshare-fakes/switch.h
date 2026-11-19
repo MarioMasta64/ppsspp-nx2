@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -12,14 +13,15 @@ struct GsvSync { int unused; }; struct GsvGpu { int unused; }; struct Event { in
 using _Event = Event;
 struct GsvGpuVaRange { uint64_t first, last; }; struct GsvImageLayout { int unused; };
 constexpr unsigned Module_Libnx = 345;
-constexpr unsigned LibnxError_BadInput = 1, LibnxError_OutOfMemory = 2;
+constexpr unsigned LibnxError_BadInput = 1, LibnxError_OutOfMemory = 2, LibnxError_NotInitialized = 3;
 #define MAKERESULT(m, d) ((m) + ((d) << 9))
 #define KERNELRESULT(name) 0x1234u
 #define R_FAILED(rc) ((rc) != 0)
 #define R_SUCCEEDED(rc) ((rc) == 0)
 #define R_VALUE(rc) (rc)
 namespace fake {
-inline int roots = 1, nv = 1, syncs = 1, gpu = 0, events = 0, clients = 0, spaces = 0;
+inline int roots = 1, syncs = 1, gpu = 0, events = 0, clients = 0;
+inline uint32_t lastSlot = 3, openedSlot = 0;
 inline int ranges = 0, memory = 0, images = 0, aliases = 0;
 inline uint32_t id = 10;
 inline bool retired = false, counterReady = true;
@@ -30,7 +32,7 @@ inline std::map<uint32_t, uintptr_t> memoryAddress;
 inline std::map<uint32_t, uint32_t> imageMemory;
 inline const uint8_t *presented = nullptr;
 inline Result failure(const char *name) { return fail == name && ++seen == failAt ? 0xdead : 0; }
-inline bool clean() { return roots == 1 && nv == 1 && syncs == 1 && !gpu && !events && !clients && !spaces && !ranges && !memory && !images && !aliases; }
+inline bool clean() { return roots == 1 && syncs == 1 && !events && !clients && !ranges && !memory && !images && !aliases; }
 }
 inline uint64_t armGetSystemTick() { return fake::ticks; }
 inline uint64_t armNsToTicks(uint64_t ns) { return ns; }
@@ -39,28 +41,29 @@ inline void armDCacheFlush(void *, size_t) {}
 inline Result svcUnknown80(void *, uint64_t, uint32_t, uint32_t) { return 0; }
 inline Result gsvInitialize() { ++fake::roots; return 0; }
 inline void gsvExit() { --fake::roots; }
-inline Result nvInitialize() { ++fake::nv; return 0; }
-inline void nvExit() { --fake::nv; }
 inline Result gsvOpenSync(GsvSync *) { ++fake::syncs; return 0; }
 inline void gsvSyncClose(GsvSync *) { --fake::syncs; }
-inline Result gsvRegisterFrame(uint64_t, uint64_t *) { return 0; }
-inline Result gsvOpenGpu(GsvGpu *) { ++fake::gpu; return 0; }
-inline void gsvGpuClose(GsvGpu *) { --fake::gpu; }
-inline Result gsvGpuCreateSlotEvent(GsvGpu *, uint32_t, Event *, bool) { ++fake::events; return 0; }
-inline Result gsvGpuOpenWorker(GsvGpu *, uint32_t, Event *) { return 0; }
-inline Result gsvGpuRegisterClient(GsvGpu *, uint64_t, uint8_t *out) { ++fake::clients; *out = 1; return 0; }
-inline Result gsvGpuReleaseClient(GsvGpu *, uint8_t) { --fake::clients; return 0; }
-inline Result gsvGpuCreateVm(GsvGpu *, uint32_t *out) { *out = 1; return 0; }
-inline Result gsvGpuGetVmUserRanges(GsvGpu *, uint32_t, GsvGpuVaRange *, uint32_t *count) { *count = 1; return 0; }
-inline Result gsvGpuGetVmGsvRange(GsvGpu *, uint32_t, GsvGpuVaRange *) { return 0; }
-inline Result gsvRegisterVm(uint32_t) { return 0; }
-inline Result nvOpen(uint32_t *out, const char *) { ++fake::spaces; *out = 1; return 0; }
-inline Result nvClose(uint32_t) { --fake::spaces; return 0; }
-inline Result nvIoctl(uint32_t, uint32_t, void *) { return 0; }
+inline Result gsvGpuGetSlotRange(GsvGpu *gpu, uint32_t *first, uint32_t *last) {
+    assert(gpu->unused == 7);
+    *first = 0;
+    *last = fake::lastSlot;
+    return 0;
+}
+inline Result gsvGpuRegisterClient(GsvGpu *gpu, uint64_t, uint8_t *out) {
+    assert(gpu->unused == 7);
+    ++fake::clients;
+    *out = 1;
+    return 0;
+}
+inline Result gsvGpuReleaseClient(GsvGpu *gpu, uint8_t) {
+    assert(gpu->unused == 7);
+    --fake::clients;
+    return 0;
+}
 inline void gsvMakeImageLayout(GsvImageLayout *, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint8_t, uint16_t) {}
 inline Result gsvGetImageSize(GsvImageLayout *, uint64_t *out) { *out = 5120 * 768; return 0; }
 inline Result gsvGpuRegisterMemory(GsvGpu *, uint64_t, uint64_t, uint8_t, uint32_t *out) { ++fake::ranges; *out = 42; return 0; }
-inline Result gsvGpuUnregisterMemory(GsvGpu *, uint32_t, uint32_t) { return 0; }
+inline Result gsvGpuUnregisterMemory(GsvGpu *gpu, uint32_t, uint32_t slot) { assert(gpu->unused == 7 && slot == fake::openedSlot); return 0; }
 inline Result eventClear(Event *) { return 0; }
 inline Result eventWait(Event *, uint64_t) { if (Result rc = fake::failure(__func__)) { return rc; } --fake::ranges; return 0; }
 inline void eventClose(Event *) { --fake::events; }

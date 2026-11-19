@@ -4,10 +4,57 @@
 #include <cassert>
 #include <string>
 #include <vector>
+#include <switch2/services/gsv.h>
+
+extern "C" Result __wrap_gsvGpuCreateSlotEvent(GsvGpu *, uint32_t, Event *, bool);
+extern "C" Result __wrap_gsvGpuOpenWorker(GsvGpu *, uint32_t, Event *);
+extern "C" void __wrap_gsvGpuClose(GsvGpu *);
+
+extern "C" Result __real_gsvGpuCreateSlotEvent(GsvGpu *gpu, uint32_t slot, Event *, bool) {
+	assert(gpu->unused == 7);
+	if (slot >= 2) {
+		assert(slot == 2 && fake::lastSlot >= slot);
+		fake::openedSlot = slot;
+		++fake::events;
+	}
+	return 0;
+}
+
+extern "C" Result __real_gsvGpuOpenWorker(GsvGpu *gpu, uint32_t slot, Event *) {
+	assert(slot == 0 && fake::gpu == 0);
+	gpu->unused = 7;
+	++fake::gpu;
+	return 0;
+}
+
+extern "C" void __real_gsvGpuClose(GsvGpu *gpu) {
+	assert(gpu->unused == 7 && fake::gpu == 1 && fake::clean());
+	gpu->unused = 0;
+	--fake::gpu;
+}
 
 int main(int argc, char **argv) {
 	const std::string mode = argc > 1 ? argv[1] : "clean";
 	Vi2Layer layer;
+	GsvGpu driver{};
+	Event driverEvent{};
+	assert(__wrap_gsvGpuOpenWorker(&driver, 0, &driverEvent) == 0);
+	assert(__wrap_gsvGpuCreateSlotEvent(&driver, 1, &driverEvent, false) == 0);
+	if (mode == "no-driver") {
+		__wrap_gsvGpuClose(&driver);
+		Switch2GuestCpuRenderer renderer;
+		assert(renderer.Open(&layer) != 0);
+		assert(renderer.Retire() == 0 && fake::clean());
+		return 0;
+	}
+	if (mode == "no-slot") {
+		fake::lastSlot = 1;
+		Switch2GuestCpuRenderer renderer;
+		assert(renderer.Open(&layer) != 0);
+		assert(renderer.Retire() == 0 && fake::clean());
+		__wrap_gsvGpuClose(&driver);
+		return 0;
+	}
 	const size_t stride = 1280 * 4 + 16;
 	std::vector<uint8_t> pixels(stride * 720);
 	for (int y = 0; y < 720; ++y) {
@@ -29,6 +76,7 @@ int main(int argc, char **argv) {
 			return 0;
 		}
 		assert(opened == 0);
+		assert(__wrap_gsvGpuCreateSlotEvent(&driver, 2, &driverEvent, false) != 0);
 		assert(renderer.Present(pixels.data(), 640, 720, stride) != 0);
 		if (mode == "present-failure") { fake::fail = "vi2PresentLayer"; }
 		const auto presented = renderer.Present(pixels.data(), 1280, 720, stride);
@@ -60,4 +108,5 @@ int main(int argc, char **argv) {
 		assert(renderer.Retire() == 0);
 	}
 	assert(fake::clean());
+	__wrap_gsvGpuClose(&driver);
 }

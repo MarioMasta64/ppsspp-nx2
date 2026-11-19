@@ -10,9 +10,10 @@ with tempfile.TemporaryDirectory(prefix='ppsspp-gameshare-renderer-') as work:
                     '-I', str(root / 'Switch/tests/gameshare-fakes'), '-I', str(root),
                     str(root / 'Switch/tests/gameshare_renderer.cpp'),
                     str(root / 'Switch/GameShare/CpuRenderer.cpp'), '-o', str(executable)], check=True)
-    for mode in ('clean', 'partial', 'present-failure', 'release-timeout', 'range-timeout', 'unregister-failure'):
+    for mode in ('clean', 'partial', 'no-driver', 'no-slot', 'present-failure',
+                 'release-timeout', 'range-timeout', 'unregister-failure'):
         environment = os.environ.copy()
-        if mode not in ('clean', 'partial'):
+        if mode in ('present-failure', 'release-timeout', 'range-timeout', 'unregister-failure'):
             environment['ASAN_OPTIONS'] = environment.get('ASAN_OPTIONS', '') + ':detect_leaks=0'
         subprocess.run([str(executable), mode], check=True, env=environment, timeout=10)
         print('Guest image ownership:', mode, 'passed', flush=True)
