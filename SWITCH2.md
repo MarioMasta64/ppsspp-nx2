@@ -48,9 +48,15 @@ from existing Switch 1 PPSSPP installations.
 - ZL or right-stick click opens the PPSSPP pause menu.
 - Use PPSSPP's Exit action to return to hbmenu.
 
-The first launch defaults to 1x PSP rendering resolution. Presentation uses
-fixed 1280x720 output at 60 Hz, Vulkan, and
-checked guest memory accesses. It does not request CPU/GPU overclocking.
+The first launch defaults to 1x PSP rendering resolution. Vulkan presentation
+uses fixed 1920x1080 output in handheld and docked modes, requesting 120 Hz
+with a 120 fps presentation target and a 60 fps fallback on 60 Hz displays.
+VRR is allowed where supported. The menu limiter follows the active native
+presentation interval, including refresh-rate changes. `boot.log` records the
+requested dimensions and changes to the presentation target; these are not
+measured frame rates. Games retain their original emulation speed and frame
+rate; 1080p output does not change the internal PSP rendering resolution.
+The port uses checked guest memory accesses and requests no CPU/GPU overclocking.
 Touch, rumble, camera, microphone, HTTPS services and external file-picker
 applets are not implemented. PPSSPP's in-app game browser is available.
 Controller bindings can be changed in PPSSPP's settings.
@@ -140,3 +146,9 @@ state, so a second thread alone is not an independent emulator instance.
 - The user confirmed that the PPSSPP menu appears on Switch 2 and controller
   navigation works. Audible output, game loading and sustained speed still
   await device qualification.
+
+## 1080p/120 fps output update
+
+The output policy above supersedes the initial 720p/60 configuration. Console
+confirmation of the first build covers its menu and controls only; this new
+resolution/refresh policy requires another device test.

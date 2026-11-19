@@ -53,7 +53,8 @@ for relative in ("libounce/licenses", "portlibs/switch2/share/licenses"):
     if origin.is_dir():
         shutil.copytree(origin, licenses / ("SDK-" + origin.parent.name), dirs_exist_ok=True)
 revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-receipt = {"upstream_revision": revision, "nro_bytes": len(blob), "sha256": hashlib.sha256(blob).hexdigest(),
+upstream = subprocess.check_output(["git", "merge-base", "HEAD", "origin/master"], cwd=root, text=True).strip()
+receipt = {"upstream_revision": upstream, "source_revision": revision, "nro_bytes": len(blob), "sha256": hashlib.sha256(blob).hexdigest(),
            "assets": sections, "console_tested": False}
 (output / "build-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
 archive = output / "ppsspp-switch2.zip"

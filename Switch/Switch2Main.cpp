@@ -33,8 +33,9 @@
 namespace {
 constexpr const char *DATA_PATH = "sdmc:/switch/ppsspp-switch2/";
 std::atomic<bool> quitRequested{false};
-uint32_t displayWidth = 1280;
-uint32_t displayHeight = 720;
+uint32_t displayWidth = 1920;
+uint32_t displayHeight = 1080;
+std::atomic<float> displayRefreshRate{60.0f};
 
 bool VerifyJit(std::string *error) {
 	Jit code{};
@@ -143,7 +144,7 @@ int64_t System_GetPropertyInt(SystemProperty prop) {
 }
 float System_GetPropertyFloat(SystemProperty prop) {
 	switch (prop) {
-	case SYSPROP_DISPLAY_REFRESH_RATE: return 60.0f;
+	case SYSPROP_DISPLAY_REFRESH_RATE: return displayRefreshRate.load();
 	case SYSPROP_DISPLAY_DPI: return 96.0f;
 	case SYSPROP_DISPLAY_SAFE_INSET_LEFT:
 	case SYSPROP_DISPLAY_SAFE_INSET_RIGHT:
@@ -247,11 +248,22 @@ int main(int argc, char *argv[]) {
 	g_Config.iGPUBackend = static_cast<int>(GPUBackend::VULKAN);
 	if (g_Config.currentDirectory == Path("/"))
 		g_Config.currentDirectory = Path("sdmc:/");
-	// Fixed 720p/60 presentation for the first device qualification.
-	nwindowSetModeDimensions(nwindowGetDefault(), 1280, 720, 1280, 720);
-	nwindowSetFrameRates(nwindowGetDefault(), 60, 60, false);
+	// Request 120 Hz where supported, retaining 60 Hz display compatibility.
+	rc = nwindowSetModeDimensions(nwindowGetDefault(), 1920, 1080, 1920, 1080);
+	if (R_SUCCEEDED(rc)) {
+		rc = nwindowSetFrameRates(nwindowGetDefault(), 120, 60, true);
+	}
+	if (R_FAILED(rc)) {
+		std::fprintf(stderr, "Display configuration failed: %08x\n", rc);
+		NativeShutdown();
+		if (socketsReady) {
+			socketExit();
+		}
+		romfsExit();
+		return ShowStartupError("Could not configure 1080p/120 Hz presentation. See boot.log.");
+	}
 	nwindowGetDimensions(nwindowGetDefault(), &displayWidth, &displayHeight);
-	std::fprintf(stderr, "Display: %ux%u\n", displayWidth, displayHeight);
+	std::fprintf(stderr, "Display: %ux%u, requested 120 fps (60 fps fallback), VRR allowed\n", displayWidth, displayHeight);
 	VulkanGraphicsContext graphics;
 	std::string error;
 	bool apiReady = graphics.InitAPI(nullptr, &g_Config.sVulkanDevice, &error);
@@ -281,6 +293,14 @@ int main(int argc, char *argv[]) {
 	RunMainLoop(&graphics, new NativeApplication(), [&](GraphicsContext *context) {
 		if (quitRequested || !appletMainLoop())
 			return false;
+		// The SDK follows VI2 refresh events; keep the menu limiter in sync.
+		u16 numerator = 0, denominator = 0;
+		if (R_SUCCEEDED(nwindowGetPresentInterval(nwindowGetDefault(), &numerator, &denominator)) && numerator && denominator) {
+			const float rate = static_cast<float>(denominator) / numerator;
+			if (displayRefreshRate.exchange(rate) != rate) {
+				std::fprintf(stderr, "Display presentation target: %.0f fps\n", rate);
+			}
+		}
 		PollInput(pad);
 		NativeFrame(context);
 		return !quitRequested;
