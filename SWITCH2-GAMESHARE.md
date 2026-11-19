@@ -174,3 +174,14 @@ waits for the color attachment writes and skips frames without an acquired
 image. A local MoltenVK run cleared three consecutive offscreen frames to
 different colors and verified every returned RGBA byte. Client presentation
 and independent input still require a console check.
+
+The console confirmed that the host and client can see and control their own
+PPSSPP screens. Both emulator audio streams were audible from the host. The
+console-confirmed NRO, matching ELF and installation receipt are saved under
+`dist-switch2-gameshare/checkpoints/dual-screen-controls/`.
+
+The current audio test build sends the same mixed PCM through Audren so a
+device test can establish whether the stock client receives audio from that
+backend. It falls back to AudOut if Audren setup fails. The GameShare SDK's
+audio flag is application-scoped. Per-console audio routing and audible output
+on the client still require separate verification.
