@@ -228,3 +228,30 @@ The successful confirmation used normal JIT configuration (`CPUCore=1`,
 FTP installation and settings restoration returned `226 OK`, with no NRO
 validation download. The PPSSPP logo and 1080p/120-Hz request are included.
 The earlier intermittent pre-menu crash remains unexplained.
+
+## Pre-GameShare checkpoint
+
+The annotated tag `switch2-single-instance-working` preserves this working
+single-emulator state. GameShare experiments use `switch2-gameshare-experiments`;
+the `switch2-kaihen` branch remains at the checkpoint.
+
+The exact console-tested NRO, its matching ELF, installable ZIP, receipts and
+qualification notes are preserved locally under
+`dist-switch2/checkpoints/switch2-single-instance-working/`. These binary
+artifacts are ignored by Git; the source checkpoint is committed and tagged.
+The archived NRO was built from `a5913fb`, with SHA-256
+`9f80a4e348b92943707f29e59f2cf7240ebd17e180e91db658fdb243fbb13b61`.
+
+If the experiment fails, preserve its changes on the experiment branch and
+switch back to the checkpoint without rewriting its history:
+
+```sh
+git switch --detach switch2-single-instance-working
+git submodule update --init --recursive
+cp dist-switch2/checkpoints/switch2-single-instance-working/ppsspp-switch2.nro \
+  dist-switch2/switch/ppsspp-switch2/ppsspp-switch2.nro
+python3 Tools/deploy-switch2.py 192.168.1.182
+```
+
+Run the final command with FTPD open. It restores the tested application NRO;
+game files, saves and user settings remain independently stored on the SD card.
